@@ -416,3 +416,39 @@ class ExperienceEvaluation(ContractModel):
                 )
 
         return self
+
+class ScopeAlignmentAssessment(ContractModel):
+    """
+    Integration result for candidate scope vs JD required scope.
+
+    The embedded SeniorityScopeEvaluation remains the deterministic numeric
+    evaluation. Review metadata is kept separate from that score.
+    """
+
+    seniority_evaluation: SeniorityScopeEvaluation
+    review_required: bool = False
+    review_reason: str | None = None
+
+    @field_validator("review_reason")
+    @classmethod
+    def validate_review_reason(
+        cls,
+        value: str | None,
+    ) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("review_reason must not be blank")
+        return value
+
+    @model_validator(mode="after")
+    def validate_review_state(self) -> "ScopeAlignmentAssessment":
+        if self.review_required and self.review_reason is None:
+            raise ValueError(
+                "review_reason is required when review_required is true"
+            )
+
+        if not self.review_required and self.review_reason is not None:
+            raise ValueError(
+                "review_reason must be absent when review_required is false"
+            )
+
+        return self

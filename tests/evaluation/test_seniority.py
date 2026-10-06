@@ -3,8 +3,18 @@ from decimal import Decimal
 import pytest
 
 from vikat_hire.contracts.common import ScopeLevel
-from vikat_hire.contracts.scope import ScopeEvidence, ScopeEvidenceCategory
+from vikat_hire.contracts.scope import (
+    JDScopeEvidence,
+    ScopeEvidence,
+    ScopeEvidenceCategory,
+    ScopeEvidencePolarity,
+)
+from vikat_hire.contracts.common import (
+    ExclusionReason,
+    ScopeLevel,
+)
 from vikat_hire.evaluation.seniority import (
+    evaluate_scope_alignment,
     evaluate_seniority_scope_from_evidence,
 )
 
@@ -24,6 +34,22 @@ def _evidence(
         provenance_refs=(f"prov-{evidence_id}",),
     )
 
+def _jd_evidence(
+    evidence_id: str,
+    *,
+    categories: tuple[ScopeEvidenceCategory, ...] = (),
+    polarity: ScopeEvidencePolarity = ScopeEvidencePolarity.SUPPORTING,
+    supervision_learning: bool = False,
+    text: str = "Explicit JD scope evidence.",
+) -> JDScopeEvidence:
+    return JDScopeEvidence(
+        evidence_id=evidence_id,
+        categories=categories,
+        supervision_learning=supervision_learning,
+        polarity=polarity,
+        explicit_text=text,
+        provenance_refs=(f"jd-{evidence_id}",),
+    )
 
 def test_from_evidence_classifies_candidate_before_scoring() -> None:
     evidence = (
@@ -224,3 +250,203 @@ def test_from_evidence_rejects_duplicate_evidence_ids() -> None:
             required_level=ScopeLevel.L2,
             provenance_refs=("source-1",),
         )
+
+
+def test_scope_alignment_integrates_jd_and_candidate_scope() -> None:
+    candidate_evidence = (
+        _evidence(
+            "ownership",
+            categories=(ScopeEvidenceCategory.OWNERSHIP,),
+        ),
+        _evidence(
+            "decision",
+            categories=(
+                ScopeEvidenceCategory.TECHNICAL_DECISION_AUTHORITY,
+            ),
+        ),
+    )
+
+    jd_evidence = (
+        _jd_evidence(
+            "ownership",
+            categories=(ScopeEvidenceCategory.OWNERSHIP,),
+        ),
+        _jd_evidence(
+            "decision",
+            categories=(
+                ScopeEvidenceCategory.TECHNICAL_DECISION_AUTHORITY,
+            ),
+        ),
+        _jd_evidence(
+            "production",
+            categories=(
+                ScopeEvidenceCategory.PRODUCTION_OPERATIONAL_OWNERSHIP,
+            ),
+        ),
+    )
+
+    result, review_required = evaluate_scope_alignment(
+        candidate_evidence=candidate_evidence,
+        jd_evidence=jd_evidence,
+        provenance_refs=("candidate-source", "jd-source"),
+    )
+
+    assert result.candidate_level == ScopeLevel.L2
+    assert result.required_level == ScopeLevel.L3
+    assert result.delta == -1
+    assert result.raw_value == Decimal("75")
+    assert result.resolution == "evaluated"
+    assert review_required is False
+
+
+def test_scope_alignment_excludes_and_requests_review_for_jd_contradiction() -> None:
+    candidate_evidence = (
+        _evidence(
+            "ownership",
+            categories=(ScopeEvidenceCategory.OWNERSHIP,),
+        ),
+    )
+
+    jd_evidence = (
+        _jd_evidence(
+            "ownership-support",
+            categories=(ScopeEvidenceCategory.OWNERSHIP,),
+            polarity=ScopeEvidencePolarity.SUPPORTING,
+        ),
+        _jd_evidence(
+            "ownership-contradiction",
+            categories=(ScopeEvidenceCategory.OWNERSHIP,),
+            polarity=ScopeEvidencePolarity.CONTRADICTING,
+        ),
+    )
+
+    result, review_required = evaluate_scope_alignment(
+        candidate_evidence=candidate_evidence,
+        jd_evidence=jd_evidence,
+        provenance_refs=("candidate-source", "jd-source"),
+    )
+
+    assert result.candidate_level == ScopeLevel.L1
+    assert result.required_level is None
+    assert result.delta is None
+    assert result.raw_value is None
+    assert result.resolution == "excluded"
+    assert result.exclusion_reason == (
+        ExclusionReason.INSUFFICIENT_EVIDENCE
+    )
+    assert review_required is True
+
+
+def test_scope_alignment_excludes_unresolved_jd_without_review() -> None:
+    candidate_evidence = (
+        _evidence(
+            "ownership",
+            categories=(ScopeEvidenceCategory.OWNERSHIP,),
+        ),
+    )
+
+    jd_evidence = (
+        _jd_evidence(
+            "production",
+            categories=(
+                ScopeEvidenceCategory.PRODUCTION_OPERATIONAL_OWNERSHIP,
+            ),
+        ),
+    )
+
+    result, review_required = evaluate_scope_alignment(
+        candidate_evidence=candidate_evidence,
+        jd_evidence=jd_evidence,
+        provenance_refs=("candidate-source", "jd-source"),
+    )
+
+    assert result.candidate_level == ScopeLevel.L1
+    assert result.required_level is None
+    assert result.delta is None
+    assert result.raw_value is None
+    assert result.resolution == "excluded"
+    assert result.exclusion_reason == (
+        ExclusionReason.INSUFFICIENT_EVIDENCE
+    )
+    assert review_required is False
+
+
+def test_scope_alignment_excludes_when_candidate_scope_is_unresolved() -> None:
+    candidate_evidence = (
+        _evidence(
+            "production",
+            categories=(
+                ScopeEvidenceCategory.PRODUCTION_OPERATIONAL_OWNERSHIP,
+            ),
+        ),
+    )
+
+    jd_evidence = (
+        _jd_evidence(
+            "ownership",
+            categories=(ScopeEvidenceCategory.OWNERSHIP,),
+        ),
+    )
+
+    result, review_required = evaluate_scope_alignment(
+        candidate_evidence=candidate_evidence,
+        jd_evidence=jd_evidence,
+        provenance_refs=("candidate-source", "jd-source"),
+    )
+
+    assert result.candidate_level is None
+    assert result.required_level == ScopeLevel.L1
+    assert result.delta is None
+    assert result.raw_value is None
+    assert result.resolution == "excluded"
+    assert result.exclusion_reason == (
+        ExclusionReason.INSUFFICIENT_EVIDENCE
+    )
+    assert review_required is False
+
+
+def test_scope_alignment_is_deterministic() -> None:
+    candidate_evidence = (
+        _evidence(
+            "ownership",
+            categories=(ScopeEvidenceCategory.OWNERSHIP,),
+        ),
+        _evidence(
+            "decision",
+            categories=(
+                ScopeEvidenceCategory.TECHNICAL_DECISION_AUTHORITY,
+            ),
+        ),
+    )
+
+    jd_evidence = (
+        _jd_evidence(
+            "ownership",
+            categories=(ScopeEvidenceCategory.OWNERSHIP,),
+        ),
+        _jd_evidence(
+            "decision",
+            categories=(
+                ScopeEvidenceCategory.TECHNICAL_DECISION_AUTHORITY,
+            ),
+        ),
+    )
+
+    first, first_review = evaluate_scope_alignment(
+        candidate_evidence=candidate_evidence,
+        jd_evidence=jd_evidence,
+        provenance_refs=("source-1",),
+    )
+
+    second, second_review = evaluate_scope_alignment(
+        candidate_evidence=candidate_evidence,
+        jd_evidence=jd_evidence,
+        provenance_refs=("source-1",),
+    )
+
+    assert first.model_dump(
+        exclude={"created_at"},
+    ) == second.model_dump(
+        exclude={"created_at"},
+    )
+    assert first_review == second_review

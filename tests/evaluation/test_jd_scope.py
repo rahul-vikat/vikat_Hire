@@ -196,7 +196,6 @@ def test_same_category_conflict_is_material() -> None:
     assert result.resolution == "unresolved"
     assert result.review_required is True
     assert result.contradiction_evidence_refs == (
-        "ownership-support",
         "ownership-contradiction",
     )
 

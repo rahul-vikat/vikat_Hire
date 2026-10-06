@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
 from decimal import Decimal
 
 from vikat_hire.contracts.common import (
@@ -9,14 +8,13 @@ from vikat_hire.contracts.common import (
     ScopeLevel,
 )
 from vikat_hire.contracts.evaluation import SeniorityScopeEvaluation
+from collections.abc import Iterable
 from vikat_hire.contracts.scope import (
     JDScopeEvidence,
     ScopeEvidence,
 )
-from vikat_hire.evaluation.jd_scope import classify_required_scope_level
 
 from .scope import classify_scope_level
-
 
 _SCOPE_INDEX: dict[ScopeLevel, int] = {
     ScopeLevel.L0: 0,
@@ -43,9 +41,7 @@ def scope_delta(
 ) -> int:
     """Calculate candidate scope minus required scope."""
 
-    return scope_level_index(candidate_level) - scope_level_index(
-        required_level
-    )
+    return scope_level_index(candidate_level) - scope_level_index(required_level)
 
 
 def score_scope_delta(delta: int) -> Decimal:
@@ -78,11 +74,10 @@ def evaluate_seniority_scope(
     evidence_refs: tuple[str, ...] = (),
     provenance_refs: tuple[str, ...],
 ) -> SeniorityScopeEvaluation:
-    """
-    Evaluate candidate scope against the JD-required scope.
+    """Evaluate candidate scope against the JD-required scope.
 
-    Scope levels must already have been deterministically classified
-    upstream. This function performs only the alignment calculation.
+    Scope levels must already have been derived and validated upstream.
+    This function performs only the deterministic alignment calculation.
     """
 
     if candidate_level is None or required_level is None:
@@ -120,7 +115,6 @@ def evaluate_seniority_scope(
         ),
     )
 
-
 def evaluate_seniority_scope_from_evidence(
     *,
     evidence: Iterable[ScopeEvidence],
@@ -128,76 +122,57 @@ def evaluate_seniority_scope_from_evidence(
     provenance_refs: tuple[str, ...],
 ) -> SeniorityScopeEvaluation:
     """
-    Classify candidate scope from authoritative normalized evidence and
-    evaluate it against the supplied JD-required scope.
+    Classify candidate scope from authoritative normalized evidence and then
+    evaluate candidate scope against the supplied JD-required scope level.
 
-    This function deliberately does not classify JD scope or apply
-    contradiction policy.
+    The required level is deliberately supplied by the caller. This function
+    does not infer JD scope and does not apply policy or contradiction logic.
     """
-
     evidence_tuple = tuple(evidence)
 
-    candidate_level = classify_scope_level(
-        evidence=evidence_tuple,
-    )
+    candidate_level = classify_scope_level(evidence=evidence_tuple)
 
-    evidence_refs = tuple(
-        item.evidence_id
-        for item in evidence_tuple
-    )
+    evidence_refs = tuple(item.evidence_id for item in evidence_tuple)
 
-    return evaluate_seniority_scope(
-        candidate_level=candidate_level,
-        required_level=required_level,
-        evidence_refs=evidence_refs,
-        provenance_refs=provenance_refs,
-    )
+    if candidate_level is None or required_level is None:
+        reasons = []
 
+        if candidate_level is None:
+            reasons.append("candidate scope could not be established")
 
-def evaluate_scope_alignment(
-    *,
-    candidate_evidence: Iterable[ScopeEvidence],
-    jd_evidence: Iterable[JDScopeEvidence],
-    provenance_refs: tuple[str, ...],
-) -> tuple[SeniorityScopeEvaluation, bool]:
-    """
-    Integrate deterministic JD-required scope classification with
-    candidate scope evaluation.
+        if required_level is None:
+            reasons.append("required scope level is unavailable")
 
-    Returns:
-        (
-            deterministic seniority scope evaluation,
-            whether policy/review handling is required,
+        return SeniorityScopeEvaluation(
+            candidate_level=candidate_level,
+            required_level=required_level,
+            resolution="excluded",
+            delta=None,
+            raw_value=None,
+            evidence_refs=evidence_refs,
+            provenance_refs=provenance_refs,
+            exclusion_reason=ExclusionReason.INSUFFICIENT_EVIDENCE,
+            rationale="; ".join(reasons),
         )
 
-    Material JD contradictions never become numeric score penalties.
-    They produce an excluded seniority evaluation and review_required=True.
-    """
-
-    candidate_evidence_tuple = tuple(candidate_evidence)
-    jd_evidence_tuple = tuple(jd_evidence)
-
-    jd_evaluation = classify_required_scope_level(
-        evidence=jd_evidence_tuple,
-    )
-
-    candidate_level = classify_scope_level(
-        evidence=candidate_evidence_tuple,
-    )
-
-    candidate_evidence_refs = tuple(
-        item.evidence_id
-        for item in candidate_evidence_tuple
-    )
-
-    seniority_evaluation = evaluate_seniority_scope(
+    delta = scope_delta(
         candidate_level=candidate_level,
-        required_level=jd_evaluation.required_level,
-        evidence_refs=candidate_evidence_refs,
-        provenance_refs=provenance_refs,
+        required_level=required_level,
     )
+    raw_value = score_scope_delta(delta)
 
-    return (
-        seniority_evaluation,
-        jd_evaluation.review_required,
+    return SeniorityScopeEvaluation(
+        candidate_level=candidate_level,
+        required_level=required_level,
+        resolution="evaluated",
+        delta=delta,
+        raw_value=raw_value,
+        evidence_refs=evidence_refs,
+        provenance_refs=provenance_refs,
+        exclusion_reason=None,
+        rationale=(
+            f"Candidate scope {candidate_level.value} compared with required "
+            f"scope {required_level.value} produced delta {delta} and raw "
+            f"score {raw_value}."
+        ),
     )
