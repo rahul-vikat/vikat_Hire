@@ -13,6 +13,7 @@ from .common import (
     DimensionResolution,
     ExclusionReason,
     MatchStatus,
+    ScopeLevel,
     RequirementImportance,
     new_id,
     utc_now,
@@ -81,6 +82,100 @@ class EvaluationResult(ContractModel):
 
     created_at: datetime = Field(default_factory=utc_now)
 
+class SeniorityScopeEvaluation(ContractModel):
+    """Deterministic evaluation of candidate scope against required scope.
+
+    The evaluator that creates this contract is responsible for applying
+    the authoritative L0-L5 delta mapping. This contract only represents
+    the validated result and its audit references.
+    """
+
+    dimension: DimensionName = DimensionName.SENIORITY_SCOPE_ALIGNMENT
+
+    candidate_level: ScopeLevel | None = None
+    required_level: ScopeLevel | None = None
+
+    resolution: DimensionResolution
+
+    delta: int | None = None
+
+    raw_value: Decimal | None = Field(
+        default=None,
+        ge=Decimal("0"),
+        le=Decimal("100"),
+    )
+
+    evidence_refs: tuple[str, ...] = ()
+    provenance_refs: tuple[str, ...] = Field(min_length=1)
+
+    exclusion_reason: ExclusionReason | None = None
+    rationale: str
+
+    created_at: datetime = Field(default_factory=utc_now)
+
+    @field_validator("rationale")
+    @classmethod
+    def rationale_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("rationale must not be blank")
+        return value
+
+    @field_validator("delta")
+    @classmethod
+    def delta_must_be_in_valid_range(cls, value: int | None) -> int | None:
+        if value is None:
+            return value
+
+        if value < -5 or value > 5:
+            raise ValueError("delta must be between -5 and 5")
+
+        return value
+
+    @model_validator(mode="after")
+    def validate_resolution(self) -> "SeniorityScopeEvaluation":
+        if self.resolution == DimensionResolution.EVALUATED:
+            if self.candidate_level is None:
+                raise ValueError(
+                    "evaluated seniority scope requires candidate_level"
+                )
+
+            if self.required_level is None:
+                raise ValueError(
+                    "evaluated seniority scope requires required_level"
+                )
+
+            if self.delta is None:
+                raise ValueError(
+                    "evaluated seniority scope requires delta"
+                )
+
+            if self.raw_value is None:
+                raise ValueError(
+                    "evaluated seniority scope requires raw_value"
+                )
+
+            if self.exclusion_reason is not None:
+                raise ValueError(
+                    "evaluated seniority scope cannot have exclusion_reason"
+                )
+
+        elif self.resolution == DimensionResolution.EXCLUDED:
+            if self.delta is not None:
+                raise ValueError(
+                    "excluded seniority scope cannot have delta"
+                )
+
+            if self.raw_value is not None:
+                raise ValueError(
+                    "excluded seniority scope cannot have raw_value"
+                )
+
+            if self.exclusion_reason is None:
+                raise ValueError(
+                    "excluded seniority scope requires exclusion_reason"
+                )
+
+        return self
 
 class RequirementGroupEvaluation(ContractModel):
     """Aggregated evaluation for one requirement-importance group."""

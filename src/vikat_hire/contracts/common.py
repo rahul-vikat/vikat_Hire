@@ -85,6 +85,15 @@ class DerivationMethod(StrEnum):
     LLM = "llm"
     HUMAN = "human"
 
+class ScopeLevel(StrEnum):
+    """Normalized, evidence-derived candidate/JD scope levels."""
+
+    L0 = "L0"
+    L1 = "L1"
+    L2 = "L2"
+    L3 = "L3"
+    L4 = "L4"
+    L5 = "L5"
 
 class Provenance(ContractModel):
     schema_version: str = SCHEMA_VERSION
