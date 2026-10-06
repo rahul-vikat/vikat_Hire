@@ -7,6 +7,8 @@ from .keyword_matcher import (
 from .requirement import (
     RequirementEvaluationError,
     evaluate_requirement,
+    ExperienceEvaluationError,
+    evaluate_jd_aligned_experience,
 )
 from .aggregation import (
     RequirementAggregationError,
@@ -19,6 +21,8 @@ __all__ = [
     "KeywordMatchingError",
     "RequirementKeyword",
     "RequirementEvaluationError",
+    "ExperienceEvaluationError",
+    "evaluate_jd_aligned_experience",
     "evaluate_requirement",
     "match_requirement",
     "RequirementAggregationError",
