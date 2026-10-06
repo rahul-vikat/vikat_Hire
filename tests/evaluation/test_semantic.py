@@ -403,4 +403,6 @@ def test_same_inputs_produce_same_deterministic_result() -> None:
         keyword_matches=matches,
     )
 
-    assert first == second
+    assert first.model_dump(exclude={"created_at"}) == second.model_dump(
+        exclude={"created_at"}
+    )

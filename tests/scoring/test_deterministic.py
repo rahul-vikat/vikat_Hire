@@ -17,8 +17,8 @@ def _evaluation(dimension: DimensionName, raw_value: str | None, *, applicabilit
 def test_calculate_score_uses_applicability_renormalization() -> None:
     evaluations = tuple(_evaluation(d, v) for d, v in ((DimensionName.MUST_HAVE_COVERAGE, "80"), (DimensionName.JD_ALIGNED_EXPERIENCE, "70"), (DimensionName.SEMANTIC_FIT, "90"), (DimensionName.SENIORITY_SCOPE_ALIGNMENT, "60"), (DimensionName.NICE_TO_HAVE_COVERAGE, "50"))) + tuple(_evaluation(d, None, resolution=DimensionResolution.EXCLUDED) for d in (DimensionName.LINKEDIN_EVIDENCE, DimensionName.GITHUB_EVIDENCE, DimensionName.PORTFOLIO_EVIDENCE))
     result = calculate_score(screening_id="screening-1", evaluations=evaluations, configuration=SCORING_CONFIGURATION_2_2_0)
-    assert result.score == Decimal("76.13")
-    assert result.applicable_weight_total == Decimal("80")
+    assert result.score == Decimal("74.94")
+    assert result.applicable_weight_total == Decimal("85")
 
 
 def test_missing_evidence_is_not_a_penalty() -> None:

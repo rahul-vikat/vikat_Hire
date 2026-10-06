@@ -99,10 +99,7 @@ def match_semantically(
     )
 
     if canonical_matches:
-        score = _maximum_score(
-            _HUNDRED,
-            *(match.score for match in canonical_matches),
-        )
+        score = _HUNDRED
 
         provenance_refs = _unique_refs(
             *(claim.provenance_refs for claim in canonical_matches)
