@@ -39,16 +39,12 @@ def scope_delta(
 
 
 def score_scope_delta(delta: int) -> Decimal:
-    """Map a scope delta to the authoritative 0-100 raw score.
+    """Map a valid L0-L5 scope delta to the authoritative raw score."""
 
-    Authoritative mapping:
-
-        delta == 0   -> 100
-        delta >= +1  -> 90
-        delta == -1  -> 75
-        delta == -2  -> 45
-        delta <= -3  -> 20
-    """
+    if delta < -5 or delta > 5:
+        raise ValueError(
+            f"scope delta must be between -5 and 5, got {delta}"
+        )
 
     if delta == 0:
         return Decimal("100")
@@ -62,10 +58,7 @@ def score_scope_delta(delta: int) -> Decimal:
     if delta == -2:
         return Decimal("45")
 
-    if delta <= -3:
-        return Decimal("20")
-
-    raise ValueError(f"Unsupported scope delta: {delta}")
+    return Decimal("20")
 
 
 def evaluate_seniority_scope(
