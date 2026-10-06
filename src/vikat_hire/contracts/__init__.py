@@ -11,10 +11,19 @@ from .common import (
     InputKind,
     MatchStatus,
     ReviewReason,
+    RequirementImportance,
     SourceReliability,
     WorkflowStatus,
 )
-from .evaluation import DimensionEvaluation, EvaluationResult
+from .evaluation import (
+    DimensionEvaluation,
+    EvaluationResult,
+    ExperienceEvaluation,
+    ExperienceRecord,
+    ExperienceRequirement,
+    RequirementEvaluation,
+    RequirementGroupEvaluation,
+)
 from .evidence import Claim, ClaimReconciliation, Evidence, Provenance
 from .inputs import DocumentInput, ExternalSourceInput, ScreeningInput
 from .matching import KeywordMatch, LLMSemanticProposal, SemanticMatch
@@ -41,6 +50,12 @@ __all__ = [
     "EvaluationResult",
     "ExclusionReason",
     "ExternalSourceInput",
+    "ExperienceEvaluation",
+    "ExperienceRecord",
+    "ExperienceRequirement",
+    "RequirementEvaluation",
+    "RequirementGroupEvaluation",
+    "RequirementImportance",
     "GateResult",
     "InputKind",
     "KeywordMatch",
