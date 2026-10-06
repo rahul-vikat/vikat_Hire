@@ -27,9 +27,9 @@ class ExternalSourceInput(ContractModel):
     github_url: HttpUrl | None = None
     portfolio_url: HttpUrl | None = None
 
-    linkedin_authorized: bool = False
-    github_authorized: bool = False
-    portfolio_authorized: bool = False
+    linkedin_authorized: bool = True
+    github_authorized: bool = True
+    portfolio_authorized: bool = True
 
 
 class ScreeningInput(ContractModel):
