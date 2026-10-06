@@ -289,10 +289,10 @@ class ExperienceEvaluation(ContractModel):
                     "evaluated experience cannot have exclusion_reason"
                 )
 
-            if not self.contributing_record_ids:
-                raise ValueError(
-                    "evaluated experience requires contributing records"
-                )
+            # if not self.contributing_record_ids:
+            #     raise ValueError(
+            #         "evaluated experience requires contributing records"
+            #     )
 
         if self.resolution is DimensionResolution.EXCLUDED:
             if self.raw_value is not None:

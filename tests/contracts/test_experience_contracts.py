@@ -139,21 +139,22 @@ def test_evaluated_experience_requires_all_measurements() -> None:
     assert evaluation.aligned_months == 60
 
 
-def test_evaluated_experience_requires_contributing_record() -> None:
-    with pytest.raises(
-        ValidationError,
-        match="requires contributing records",
-    ):
-        ExperienceEvaluation(
-            requirement_id="req-exp-001",
-            resolution=DimensionResolution.EVALUATED,
-            aligned_months=60,
-            aligned_years=Decimal("5"),
-            required_years=Decimal("5"),
-            raw_value=Decimal("100"),
-            contributing_record_ids=(),
-            rationale="Invalid evaluation.",
-        )
+def test_evaluated_experience_zero_does_not_require_contributing_record() -> None:
+    evaluation = ExperienceEvaluation(
+        requirement_id="exp-001",
+        resolution=DimensionResolution.EVALUATED,
+        aligned_months=0,
+        aligned_years=Decimal("0"),
+        required_years=Decimal("5"),
+        raw_value=Decimal("0"),
+        contributing_record_ids=(),
+        rationale="No aligned experience.",
+    )
+
+    assert evaluation.resolution is DimensionResolution.EVALUATED
+    assert evaluation.raw_value == Decimal("0")
+    assert evaluation.contributing_record_ids == ()
+    assert evaluation.exclusion_reason is None
 
 
 def test_excluded_experience_has_no_score() -> None:
