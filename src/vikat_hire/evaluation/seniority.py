@@ -8,7 +8,10 @@ from vikat_hire.contracts.common import (
     ScopeLevel,
 )
 from vikat_hire.contracts.evaluation import SeniorityScopeEvaluation
+from collections.abc import Iterable
+from vikat_hire.contracts.scope import ScopeEvidence
 
+from .scope import classify_scope_level
 
 _SCOPE_INDEX: dict[ScopeLevel, int] = {
     ScopeLevel.L0: 0,
@@ -106,5 +109,67 @@ def evaluate_seniority_scope(
             f"Candidate scope {candidate_level.value} has delta {delta} "
             f"against required scope {required_level.value}; "
             f"deterministic scope mapping produced {raw_value}."
+        ),
+    )
+
+def evaluate_seniority_scope_from_evidence(
+    *,
+    evidence: Iterable[ScopeEvidence],
+    required_level: ScopeLevel | None,
+    provenance_refs: tuple[str, ...],
+) -> SeniorityScopeEvaluation:
+    """
+    Classify candidate scope from authoritative normalized evidence and then
+    evaluate candidate scope against the supplied JD-required scope level.
+
+    The required level is deliberately supplied by the caller. This function
+    does not infer JD scope and does not apply policy or contradiction logic.
+    """
+    evidence_tuple = tuple(evidence)
+
+    candidate_level = classify_scope_level(evidence=evidence_tuple)
+
+    evidence_refs = tuple(item.evidence_id for item in evidence_tuple)
+
+    if candidate_level is None or required_level is None:
+        reasons = []
+
+        if candidate_level is None:
+            reasons.append("candidate scope could not be established")
+
+        if required_level is None:
+            reasons.append("required scope level is unavailable")
+
+        return SeniorityScopeEvaluation(
+            candidate_level=candidate_level,
+            required_level=required_level,
+            resolution="excluded",
+            delta=None,
+            raw_value=None,
+            evidence_refs=evidence_refs,
+            provenance_refs=provenance_refs,
+            exclusion_reason=ExclusionReason.INSUFFICIENT_EVIDENCE,
+            rationale="; ".join(reasons),
+        )
+
+    delta = scope_delta(
+        candidate_level=candidate_level,
+        required_level=required_level,
+    )
+    raw_value = score_scope_delta(delta)
+
+    return SeniorityScopeEvaluation(
+        candidate_level=candidate_level,
+        required_level=required_level,
+        resolution="evaluated",
+        delta=delta,
+        raw_value=raw_value,
+        evidence_refs=evidence_refs,
+        provenance_refs=provenance_refs,
+        exclusion_reason=None,
+        rationale=(
+            f"Candidate scope {candidate_level.value} compared with required "
+            f"scope {required_level.value} produced delta {delta} and raw "
+            f"score {raw_value}."
         ),
     )

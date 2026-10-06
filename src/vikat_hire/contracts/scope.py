@@ -16,6 +16,62 @@ class ScopeEvidenceCategory(StrEnum):
     PRODUCTION_OPERATIONAL_OWNERSHIP = "production_operational_ownership"
     ENGINEERING_STRATEGY = "engineering_strategy"
 
+class ScopeEvidencePolarity(StrEnum):
+    SUPPORTING = "supporting"
+    CONTRADICTING = "contradicting"
+
+
+class JDScopeEvidence(ContractModel):
+    """
+    Normalized JD scope evidence.
+
+    This is deliberately separate from candidate ScopeEvidence because
+    contradiction polarity is meaningful for JD interpretation while the
+    candidate-side evidence contract remains unchanged.
+    """
+
+    evidence_id: str = Field(min_length=1)
+    categories: tuple[ScopeEvidenceCategory, ...] = ()
+    supervision_learning: bool = False
+    polarity: ScopeEvidencePolarity
+    explicit_text: str = Field(min_length=1)
+    provenance_refs: tuple[str, ...] = Field(min_length=1)
+
+    @field_validator("explicit_text")
+    @classmethod
+    def validate_explicit_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("explicit_text must not be blank")
+        return value
+
+    @field_validator("categories")
+    @classmethod
+    def validate_categories(
+        cls,
+        value: tuple[ScopeEvidenceCategory, ...],
+    ) -> tuple[ScopeEvidenceCategory, ...]:
+        if len(set(value)) != len(value):
+            raise ValueError("categories must not contain duplicates")
+        return value
+
+class JDScopeEvaluation(ContractModel):
+    required_level: ScopeLevel | None = None
+    resolution: str
+    review_required: bool = False
+    evidence_refs: tuple[str, ...] = ()
+    contradiction_evidence_refs: tuple[str, ...] = ()
+    provenance_refs: tuple[str, ...] = Field(min_length=1)
+    rationale: str = Field(min_length=1)
+
+    @field_validator("resolution")
+    @classmethod
+    def validate_resolution(cls, value: str) -> str:
+        allowed = {"evaluated", "unresolved"}
+        if value not in allowed:
+            raise ValueError(
+                f"resolution must be one of {sorted(allowed)}"
+            )
+        return value
 
 class ScopeEvidence(ContractModel):
     """
@@ -27,7 +83,7 @@ class ScopeEvidence(ContractModel):
     """
 
     evidence_id: str = Field(min_length=1)
-    categories: tuple[ScopeEvidenceCategory, ...] = Field(min_length=1)
+    categories: tuple[ScopeEvidenceCategory, ...] = ()
     supervision_learning: bool = False
     explicit_text: str = Field(min_length=1)
     provenance_refs: tuple[str, ...] = Field(min_length=1)
