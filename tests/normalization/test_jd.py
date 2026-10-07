@@ -55,13 +55,12 @@ def test_must_have_requirement_is_normalized_without_evaluation() -> None:
 
     result = requirements[0]
 
-    assert result.category is RequirementCategory.MUST_HAVE
+    assert result.category is RequirementCategory.SKILL
     assert result.importance is RequirementImportance.MUST_HAVE
     assert result.text == "Python and PostgreSQL"
     assert result.provenance_refs == ("resume-source",)
     assert not hasattr(result, "score")
     assert not hasattr(result, "match")
-
 
 def test_nice_to_have_requirement_is_normalized() -> None:
     requirements, _, _ = normalize_jd(
@@ -143,7 +142,7 @@ def test_scope_evidence_is_supporting_and_not_classified() -> None:
     assert not hasattr(result, "score")
 
 
-def test_supervision_is_explicit_jd_scope_evidence() -> None:
+def test_supervision_is_supporting_jd_scope_evidence() -> None:
     _, _, scope = normalize_jd(
         blocks=(
             _block(
@@ -157,8 +156,7 @@ def test_supervision_is_explicit_jd_scope_evidence() -> None:
     assert len(scope) == 1
     assert scope[0].supervision_learning is True
     assert scope[0].categories == ()
-    assert scope[0].polarity is ScopeEvidencePolarity.CONTRADICTING
-
+    assert scope[0].polarity is ScopeEvidencePolarity.SUPPORTING
 
 def test_scope_polarity_is_preserved() -> None:
     _, _, scope = normalize_jd(
@@ -247,3 +245,18 @@ def test_zero_minimum_years_fails() -> None:
             ),
             screening_id="screening-1",
         )
+
+def test_negative_supervision_statement_is_contradicting() -> None:
+    _, _, scope = normalize_jd(
+        blocks=(
+            _block(
+                "block-1",
+                "This role does not work under supervision.",
+            ),
+        ),
+        screening_id="screening-1",
+    )
+
+    assert len(scope) == 1
+    assert scope[0].supervision_learning is True
+    assert scope[0].polarity is ScopeEvidencePolarity.CONTRADICTING

@@ -13,19 +13,24 @@ from vikat_hire.contracts.normalization import (
     JDRequirement,
     NormalizedJDScopeEvidence,
 )
-from vikat_hire.contracts.scope import ScopeEvidencePolarity
-from vikat_hire.contracts.scope import ScopeEvidenceCategory
+from vikat_hire.contracts.scope import (
+    ScopeEvidenceCategory,
+    ScopeEvidencePolarity,
+)
 
 
-_REQUIREMENT_PREFIXES: tuple[tuple[str, RequirementCategory], ...] = (
-    ("must have:", RequirementCategory.MUST_HAVE),
-    ("must-have:", RequirementCategory.MUST_HAVE),
-    ("required:", RequirementCategory.MUST_HAVE),
-    ("requirements:", RequirementCategory.MUST_HAVE),
-    ("nice to have:", RequirementCategory.NICE_TO_HAVE),
-    ("nice-to-have:", RequirementCategory.NICE_TO_HAVE),
-    ("preferred:", RequirementCategory.NICE_TO_HAVE),
-    ("bonus:", RequirementCategory.NICE_TO_HAVE),
+_REQUIREMENT_PREFIXES: tuple[
+    tuple[str, RequirementImportance],
+    ...,
+] = (
+    ("must have:", RequirementImportance.MUST_HAVE),
+    ("must-have:", RequirementImportance.MUST_HAVE),
+    ("required:", RequirementImportance.MUST_HAVE),
+    ("requirements:", RequirementImportance.MUST_HAVE),
+    ("nice to have:", RequirementImportance.NICE_TO_HAVE),
+    ("nice-to-have:", RequirementImportance.NICE_TO_HAVE),
+    ("preferred:", RequirementImportance.NICE_TO_HAVE),
+    ("bonus:", RequirementImportance.NICE_TO_HAVE),
 )
 
 
@@ -183,6 +188,7 @@ def normalize_jd(
                 block=block,
                 line_number=line_number,
             )
+
             if requirement is not None:
                 requirements.append(requirement)
 
@@ -191,13 +197,18 @@ def normalize_jd(
                     requirement=requirement,
                     block=block,
                 )
+
                 if experience_requirement is not None:
-                    experience_requirements.append(experience_requirement)
+                    experience_requirements.append(
+                        experience_requirement
+                    )
 
             jd_scope = _parse_scope_evidence(
                 line=line,
                 block=block,
+                line_number=line_number,
             )
+
             if jd_scope is not None:
                 scope_evidence.append(jd_scope)
 
@@ -213,7 +224,11 @@ def _clean_line(value: str) -> str:
 
 
 def _strip_bullet(value: str) -> str:
-    return re.sub(r"^\s*(?:[-*•]|\d+[.)])\s*", "", value).strip()
+    return re.sub(
+        r"^\s*(?:[-*•]|\d+[.)])\s*",
+        "",
+        value,
+    ).strip()
 
 
 def _parse_requirement(
@@ -225,23 +240,22 @@ def _parse_requirement(
     normalized = _strip_bullet(line)
     lowered = normalized.casefold()
 
-    category: RequirementCategory | None = None
+    importance: RequirementImportance | None = None
     requirement_text = normalized
 
-    for prefix, candidate_category in _REQUIREMENT_PREFIXES:
+    for prefix, candidate_importance in _REQUIREMENT_PREFIXES:
         if lowered.startswith(prefix):
-            category = candidate_category
+            importance = candidate_importance
             requirement_text = normalized[len(prefix):].strip()
             break
 
-    if category is None:
-        if _looks_like_requirement(normalized):
-            category = _infer_requirement_category(normalized)
+    if importance is None and _looks_like_requirement(normalized):
+        importance = _infer_requirement_importance(normalized)
 
-    if category is None or not requirement_text:
+    if importance is None or not requirement_text:
         return None
 
-    importance = _importance_for_category(category)
+    category = _infer_requirement_category(requirement_text)
 
     evidence_ref = f"{block.block_id}:line:{line_number}"
 
@@ -281,7 +295,9 @@ def _looks_like_requirement(line: str) -> bool:
     return lowered.startswith(markers)
 
 
-def _infer_requirement_category(line: str) -> RequirementCategory:
+def _infer_requirement_importance(
+    line: str,
+) -> RequirementImportance:
     lowered = line.casefold()
 
     if any(
@@ -293,18 +309,87 @@ def _infer_requirement_category(line: str) -> RequirementCategory:
             "bonus",
         )
     ):
-        return RequirementCategory.NICE_TO_HAVE
-
-    return RequirementCategory.MUST_HAVE
-
-
-def _importance_for_category(
-    category: RequirementCategory,
-) -> RequirementImportance:
-    if category is RequirementCategory.NICE_TO_HAVE:
         return RequirementImportance.NICE_TO_HAVE
 
     return RequirementImportance.MUST_HAVE
+
+
+def _infer_requirement_category(
+    line: str,
+) -> RequirementCategory:
+    lowered = line.casefold()
+
+    if _contains_experience_requirement(lowered):
+        return RequirementCategory.EXPERIENCE
+
+    if any(
+        marker in lowered
+        for marker in (
+            "responsible for",
+            "responsibilities:",
+        )
+    ):
+        return RequirementCategory.RESPONSIBILITY
+
+    if any(
+        marker in lowered
+        for marker in (
+            "degree",
+            "bachelor",
+            "master",
+            "phd",
+            "education",
+        )
+    ):
+        return RequirementCategory.EDUCATION
+
+    if any(
+        marker in lowered
+        for marker in (
+            "certification",
+            "certified",
+        )
+    ):
+        return RequirementCategory.CERTIFICATION
+
+    if any(
+        marker in lowered
+        for marker in (
+            "location",
+            "located in",
+            "based in",
+            "remote",
+            "onsite",
+            "on-site",
+        )
+    ):
+        return RequirementCategory.LOCATION
+
+    if any(
+        marker in lowered
+        for marker in (
+            "availability",
+            "available to",
+        )
+    ):
+        return RequirementCategory.AVAILABILITY
+
+    return RequirementCategory.SKILL
+
+
+def _contains_experience_requirement(line: str) -> bool:
+    return any(
+        pattern.search(line) is not None
+        for pattern in _EXPERIENCE_PATTERNS
+    ) or any(
+        marker in line
+        for marker in (
+            "experience with",
+            "experience in",
+            "experience building",
+            "experience working",
+        )
+    )
 
 
 def _parse_experience_requirement(
@@ -341,6 +426,9 @@ def _parse_experience_requirement(
         importance=requirement.importance,
         minimum_years=minimum_years,
         canonical_skill_refs=requirement.canonical_refs,
+        source_type=requirement.source_type,
+        source_ref=requirement.source_ref,
+        evidence_refs=requirement.evidence_refs,
         provenance_refs=block.provenance_refs,
     )
 
@@ -349,6 +437,7 @@ def _parse_scope_evidence(
     *,
     line: str,
     block: ExtractedTextBlock,
+    line_number: int,
 ) -> NormalizedJDScopeEvidence | None:
     normalized = _strip_bullet(line)
     lowered = normalized.casefold()
@@ -369,7 +458,7 @@ def _parse_scope_evidence(
 
     polarity = _scope_polarity(lowered)
 
-    evidence_id = f"{block.block_id}:scope"
+    evidence_id = f"{block.block_id}:scope:{line_number}"
 
     return NormalizedJDScopeEvidence(
         evidence_id=evidence_id,
@@ -381,15 +470,19 @@ def _parse_scope_evidence(
     )
 
 
-def _scope_polarity(line: str) -> ScopeEvidencePolarity:
+def _scope_polarity(
+    line: str,
+) -> ScopeEvidencePolarity:
     contradicting_markers = (
-        "without",
+        "without ",
         "no responsibility",
         "not responsible",
         "does not own",
         "doesn't own",
         "no ownership",
-        "under supervision",
+        "not under supervision",
+        "without supervision",
+        "no supervision",
     )
 
     if any(marker in line for marker in contradicting_markers):
