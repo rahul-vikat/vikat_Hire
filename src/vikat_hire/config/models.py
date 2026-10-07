@@ -147,3 +147,30 @@ class AIModelConfiguration(BaseModel):
         if not value.strip():
             raise ValueError("value must not be blank")
         return value
+
+class AIRuntimeConfiguration(BaseModel):
+    """
+    Immutable provider-neutral runtime controls for AI generation.
+
+    Provider-specific request construction remains the responsibility of the
+    provider adapter. Secrets are intentionally excluded.
+    """
+
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid",
+        validate_assignment=True,
+    )
+
+    temperature: Decimal = Field(
+        default=Decimal("0"),
+        ge=Decimal("0"),
+        le=Decimal("2"),
+    )
+
+    max_tokens: int = Field(
+        default=1024,
+        gt=0,
+    )
+
+    structured_output: bool = True
