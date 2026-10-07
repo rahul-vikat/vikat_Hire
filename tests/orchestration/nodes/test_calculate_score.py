@@ -9,6 +9,7 @@ from vikat_hire.contracts.common import (
     DimensionName,
     DimensionResolution,
     ExclusionReason,
+    InputKind,
 )
 from vikat_hire.contracts.evaluation import (
     DimensionEvaluation,
@@ -28,19 +29,28 @@ SCORING_RELEASE = "verifyhire-scoring@2.2.0"
 def _screening_input() -> ScreeningInput:
     return ScreeningInput(
         jd=DocumentInput(
+            kind=InputKind.JD,
             filename="job-description.txt",
-            content="Python backend engineer",
+            media_type="text/plain",
+            content_hash="jd-content-hash",
+            storage_ref="test://job-description",
         ),
         resume=DocumentInput(
+            kind=InputKind.RESUME,
             filename="resume.txt",
-            content="Python backend engineer",
+            media_type="text/plain",
+            content_hash="resume-content-hash",
+            storage_ref="test://resume",
         ),
     )
 
 
 def _state_with_evaluation() -> ScreeningState:
+    screening_input = _screening_input()
+
     state = ScreeningState(
-        screening_input=_screening_input(),
+        screening_id=screening_input.screening_id,
+        screening_input=screening_input,
     )
 
     evaluation = EvaluationResult(
@@ -114,8 +124,11 @@ def test_calculate_score_node_preserves_unrelated_state() -> None:
 
 
 def test_calculate_score_node_requires_evaluation() -> None:
+    screening_input = _screening_input()
+
     state = ScreeningState(
-        screening_input=_screening_input(),
+        screening_id=screening_input.screening_id,
+        screening_input=screening_input,
     )
 
     with pytest.raises(
