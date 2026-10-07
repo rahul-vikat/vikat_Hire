@@ -298,3 +298,24 @@ def test_contradictory_claims_can_coexist_without_reconciliation() -> None:
     )
 
     assert len(result.claims) == 2
+
+def test_normalized_jd_scope_evidence_converts_to_evaluation_contract() -> None:
+    from vikat_hire.contracts.common import ScopeEvidenceCategory
+    from vikat_hire.contracts.normalization import NormalizedJDScopeEvidence
+    from vikat_hire.contracts.scope import ScopeEvidencePolarity
+
+    normalized = NormalizedJDScopeEvidence(
+        evidence_id="jd-scope-1",
+        categories=(ScopeEvidenceCategory.OWNERSHIP,),
+        polarity=ScopeEvidencePolarity.SUPPORTING,
+        explicit_text="Own services end-to-end.",
+        provenance_refs=("jd-page-1",),
+    )
+
+    result = normalized.to_evaluation_evidence()
+
+    assert result.evidence_id == "jd-scope-1"
+    assert result.categories == (ScopeEvidenceCategory.OWNERSHIP,)
+    assert result.polarity is ScopeEvidencePolarity.SUPPORTING
+    assert result.explicit_text == "Own services end-to-end."
+    assert result.provenance_refs == ("jd-page-1",)

@@ -19,7 +19,7 @@ from .common import (
 )
 from .evidence import Claim
 from .evaluation import ExperienceRecord
-from .scope import ScopeEvidence
+from .scope import JDScopeEvidence, ScopeEvidence, ScopeEvidenceCategory, ScopeEvidencePolarity
 
 
 class NormalizedSourceState(StrEnum):
@@ -304,6 +304,25 @@ class NormalizedScopeEvidence(ContractModel):
     provenance_refs: tuple[str, ...] = Field(min_length=1)
 
 
+class NormalizedJDScopeEvidence(ContractModel):
+    evidence_id: str = Field(min_length=1)
+    categories: tuple[ScopeEvidenceCategory, ...] = ()
+    supervision_learning: bool = False
+    polarity: ScopeEvidencePolarity
+    explicit_text: str = Field(min_length=1)
+    provenance_refs: tuple[str, ...] = Field(min_length=1)
+
+    def to_evaluation_evidence(self) -> JDScopeEvidence:
+        return JDScopeEvidence(
+            evidence_id=self.evidence_id,
+            categories=self.categories,
+            supervision_learning=self.supervision_learning,
+            polarity=self.polarity,
+            explicit_text=self.explicit_text,
+            provenance_refs=self.provenance_refs,
+        )
+
+
 class NormalizationResult(ContractModel):
     """
     Complete normalization output.
@@ -312,7 +331,7 @@ class NormalizationResult(ContractModel):
     match score, seniority score, or final screening score.
     """
 
-    screening_id: str
+    screening_id: str = Field(min_length=1)
 
     extracted_blocks: tuple[ExtractedTextBlock, ...] = ()
 
@@ -327,6 +346,10 @@ class NormalizationResult(ContractModel):
     scope_evidence: tuple[NormalizedScopeEvidence, ...] = ()
 
     jd_requirements: tuple[JDRequirement, ...] = ()
+
+    jd_experience_requirements: tuple[JDExperienceRequirement, ...] = ()
+
+    jd_scope_evidence: tuple[NormalizedJDScopeEvidence, ...] = ()
 
     source_states: dict[str, NormalizedSourceState] = {}
 
