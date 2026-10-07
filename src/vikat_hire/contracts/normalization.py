@@ -34,6 +34,7 @@ class ExtractionKind(StrEnum):
     PDF_TEXT = "pdf_text"
     DOCX_TEXT = "docx_text"
     PLAIN_TEXT = "plain_text"
+    OCR_TEXT = "ocr_text"
 
 
 class ExtractedTextBlock(ContractModel):
