@@ -1,22 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-
+from vikat_hire.ai import ExplanationProvider
 from vikat_hire.ai.explanation import (
     ExplanationAssemblyError,
     assemble_explanation_context,
 )
-from vikat_hire.contracts.explanation import (
-    ExplanationContext,
-    ExplanationResult,
-)
+from vikat_hire.contracts.explanation import ExplanationResult
 from vikat_hire.contracts.state import ScreeningState
-
-
-ExplanationGenerator = Callable[
-    [ExplanationContext],
-    ExplanationResult,
-]
 
 
 class ExplanationGenerationNodeError(ValueError):
@@ -26,17 +16,15 @@ class ExplanationGenerationNodeError(ValueError):
 def generate_explanation_node(
     state: ScreeningState,
     *,
-    generator: ExplanationGenerator,
+    generator: ExplanationProvider,
 ) -> ScreeningState:
     """
     Generate and attach the recruiter-facing explanation.
 
-    The node assembles authoritative evaluation, score, and policy artifacts
-    into an ExplanationContext and passes that context to an injected
-    explanation generator.
+    The generator receives only authoritative evaluation, score, and policy
+    artifacts assembled into an ExplanationContext.
 
-    The generator may interpret the authoritative artifacts, but the node
-    does not permit it to replace or recalculate evaluation, score, policy,
+    The generator cannot replace or recalculate evaluation, score, policy,
     eligibility, or other authoritative decisions.
     """
 
