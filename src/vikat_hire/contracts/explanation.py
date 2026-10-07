@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from .common import ContractModel, DimensionName, new_id, utc_now
+from .evaluation import EvaluationResult
+from .policy import PolicyResult
+from .scoring import ScoreResult
 
 
 class DimensionExplanation(ContractModel):
@@ -112,3 +115,57 @@ class ExplanationResult(ContractModel):
         if not value.strip():
             raise ValueError("generated_by must not be blank")
         return value
+
+
+class ExplanationContext(ContractModel):
+    """
+    Authoritative input assembled for explanation generation.
+
+    This contract contains existing deterministic artifacts only.
+    It does not calculate score, eligibility, evaluation, or policy.
+    An explanation generator may interpret this context, but may not
+    replace any authoritative artifact with model-generated values.
+    """
+
+    screening_id: str
+
+    evaluation: EvaluationResult
+
+    score: ScoreResult | None = None
+
+    policy: PolicyResult | None = None
+
+    @field_validator("screening_id")
+    @classmethod
+    def screening_id_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("explanation context screening_id must not be blank")
+        return value
+
+    @model_validator(mode="after")
+    def validate_artifact_screening_ids(self) -> "ExplanationContext":
+        if self.evaluation.screening_id != self.screening_id:
+            raise ValueError(
+                "explanation context evaluation screening_id does not match "
+                "screening_id"
+            )
+
+        if (
+            self.policy is not None
+            and self.policy.screening_id != self.screening_id
+        ):
+            raise ValueError(
+                "explanation context policy screening_id does not match "
+                "screening_id"
+            )
+
+        if (
+            self.score is not None
+            and self.score.screening_id != self.screening_id
+        ):
+            raise ValueError(
+                "explanation context score screening_id does not match "
+                "screening_id"
+            )
+
+        return self

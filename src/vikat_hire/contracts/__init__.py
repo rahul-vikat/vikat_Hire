@@ -24,7 +24,11 @@ from .evaluation import (
     RequirementEvaluation,
     RequirementGroupEvaluation,
 )
-from .explanation import DimensionExplanation, ExplanationResult
+from .explanation import (
+    DimensionExplanation,
+    ExplanationContext,
+    ExplanationResult,
+)
 from .evidence import Claim, ClaimReconciliation, Evidence, Provenance
 from .inputs import DocumentInput, ExternalSourceInput, ScreeningInput
 from .matching import KeywordMatch, LLMSemanticProposal, SemanticMatch
@@ -45,6 +49,7 @@ __all__ = [
     "DimensionResolution",
     "DimensionScore",
     "DimensionExplanation",
+    "ExplanationContext",
     "ExplanationResult",
     "DocumentInput",
     "Evidence",
