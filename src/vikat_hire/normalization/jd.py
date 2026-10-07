@@ -60,6 +60,7 @@ _SCOPE_MARKERS: tuple[
             "end-to-end ownership",
             "own features",
             "own services",
+            "own production services",
             "own systems",
             "ownership",
         ),
@@ -70,6 +71,7 @@ _SCOPE_MARKERS: tuple[
             "technical decision",
             "technical decisions",
             "design decisions",
+            "make architecture decisions",
             "made architecture decisions",
             "api design decisions",
             "database design decisions",
@@ -422,10 +424,11 @@ def _parse_experience_requirement(
 
     return JDExperienceRequirement(
         requirement_id=requirement.requirement_id,
+        category=RequirementCategory.EXPERIENCE,
         text=requirement.text,
         importance=requirement.importance,
         minimum_years=minimum_years,
-        canonical_skill_refs=requirement.canonical_refs,
+        canonical_refs=requirement.canonical_refs,
         source_type=requirement.source_type,
         source_ref=requirement.source_ref,
         evidence_refs=requirement.evidence_refs,
@@ -483,6 +486,8 @@ def _scope_polarity(
         "not under supervision",
         "without supervision",
         "no supervision",
+        "does not work under supervision",
+        "doesn't work under supervision",
     )
 
     if any(marker in line for marker in contradicting_markers):

@@ -80,7 +80,7 @@ def test_nice_to_have_requirement_is_normalized() -> None:
     )
 
     assert len(requirements) == 1
-    assert requirements[0].category is RequirementCategory.NICE_TO_HAVE
+    assert requirements[0].category is RequirementCategory.EXPERIENCE
     assert requirements[0].importance is RequirementImportance.NICE_TO_HAVE
 
 
