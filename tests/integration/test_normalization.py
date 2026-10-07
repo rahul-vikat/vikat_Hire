@@ -97,9 +97,11 @@ def test_resume_document_extraction_flows_into_candidate_normalization() -> None
     )
 
     assert claims
-    assert responsibilities == ()
+    assert [item.text for item in responsibilities] == [
+        "Owned the authentication service end-to-end."
+    ]
 
-    for item in (*claims, *skills, *experiences, *scope):
+    for item in (*claims, *skills, *responsibilities, *experiences, *scope):
         assert item.provenance_refs == ("resume-001:source",)
 
     assert not hasattr(scope[0].scope_evidence, "level")
@@ -428,4 +430,25 @@ def test_same_extracted_resume_input_produces_same_normalized_structure() -> Non
         screening_id="screening-deterministic",
     )
 
-    assert first == second
+    first_dumped = tuple(
+        item.model_dump(
+            exclude={
+                "created_at": True,
+                "claim": {"created_at"},
+            }
+        )
+        for collection in first
+        for item in collection
+    )
+    second_dumped = tuple(
+        item.model_dump(
+            exclude={
+                "created_at": True,
+                "claim": {"created_at"},
+            }
+        )
+        for collection in second
+        for item in collection
+    )
+
+    assert first_dumped == second_dumped

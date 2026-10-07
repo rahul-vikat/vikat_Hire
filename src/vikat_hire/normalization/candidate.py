@@ -320,6 +320,7 @@ def _looks_like_claim(text: str) -> bool:
             "i'm ",
             "i am ",
             "worked ",
+            "owned ",
             "built ",
             "developed ",
             "experienced ",
