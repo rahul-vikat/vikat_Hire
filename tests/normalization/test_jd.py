@@ -8,9 +8,14 @@ from vikat_hire.contracts.common import (
     RequirementCategory,
     RequirementImportance,
 )
-from vikat_hire.contracts.normalization import ExtractedTextBlock
-from vikat_hire.contracts.scope import ScopeEvidencePolarity
-from vikat_hire.contracts.scope import ScopeEvidenceCategory
+from vikat_hire.contracts.normalization import (
+    ExtractedTextBlock,
+    ExtractionKind,
+)
+from vikat_hire.contracts.scope import (
+    ScopeEvidenceCategory,
+    ScopeEvidencePolarity,
+)
 from vikat_hire.normalization.jd import normalize_jd
 
 
@@ -25,6 +30,7 @@ def _block(
         source_type="jd_file",
         source_ref="jd-1",
         text=text,
+        extraction_kind=ExtractionKind.PLAIN_TEXT,
         provenance_refs=provenance_refs,
     )
 
