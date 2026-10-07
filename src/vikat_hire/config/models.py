@@ -96,9 +96,6 @@ class ImmutableScoringConfiguration(BaseModel):
                 f"scoring weights must sum to exactly 100; got {total}"
             )
 
-        # MappingProxyType gives us deep protection for the mapping itself,
-        # while the Pydantic serializer below converts it back to a normal
-        # mapping for serialization.
         return MappingProxyType(dict(value))
 
     @field_serializer("weights")
@@ -123,3 +120,30 @@ class ImmutableScoringConfiguration(BaseModel):
         """Return the configured total weight."""
 
         return sum(self.weights.values(), Decimal("0"))
+
+
+class AIModelConfiguration(BaseModel):
+    """
+    Immutable provider-neutral AI model configuration.
+
+    This identifies which provider/model configuration is selected.
+    Credentials and runtime secrets are intentionally not part of this
+    configuration contract.
+    """
+
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid",
+        validate_assignment=True,
+    )
+
+    provider: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    model_config_ref: str = Field(min_length=1)
+
+    @field_validator("provider", "model", "model_config_ref")
+    @classmethod
+    def reject_blank_strings(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("value must not be blank")
+        return value

@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Annotated
 
 from pydantic import Field
-
+from .explanation import ExplanationResult
 from .common import ContractModel, ReviewReason, WorkflowStatus, new_id, utc_now
 from .evaluation import EvaluationResult
 from .evidence import Claim, ClaimReconciliation, Evidence, Provenance
@@ -58,6 +58,8 @@ class ScreeningState(ContractModel):
     score: ScoreResult | None = None
 
     policy: PolicyResult | None = None
+    
+    explanation: ExplanationResult | None = None
 
     pending_reviews: tuple[ReviewRequest, ...] = ()
 
