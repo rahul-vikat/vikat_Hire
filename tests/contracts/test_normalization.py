@@ -300,9 +300,8 @@ def test_contradictory_claims_can_coexist_without_reconciliation() -> None:
     assert len(result.claims) == 2
 
 def test_normalized_jd_scope_evidence_converts_to_evaluation_contract() -> None:
-    from vikat_hire.contracts.common import ScopeEvidenceCategory
     from vikat_hire.contracts.normalization import NormalizedJDScopeEvidence
-    from vikat_hire.contracts.scope import ScopeEvidencePolarity
+    from vikat_hire.contracts.scope import ScopeEvidenceCategory, ScopeEvidencePolarity
 
     normalized = NormalizedJDScopeEvidence(
         evidence_id="jd-scope-1",

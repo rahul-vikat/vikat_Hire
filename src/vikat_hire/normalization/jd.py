@@ -6,7 +6,6 @@ from decimal import Decimal, InvalidOperation
 from vikat_hire.contracts.common import (
     RequirementCategory,
     RequirementImportance,
-    ScopeEvidenceCategory,
 )
 from vikat_hire.contracts.normalization import (
     ExtractedTextBlock,
@@ -15,6 +14,7 @@ from vikat_hire.contracts.normalization import (
     NormalizedJDScopeEvidence,
 )
 from vikat_hire.contracts.scope import ScopeEvidencePolarity
+from vikat_hire.contracts.scope import ScopeEvidenceCategory
 
 
 _REQUIREMENT_PREFIXES: tuple[tuple[str, RequirementCategory], ...] = (

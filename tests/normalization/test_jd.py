@@ -7,10 +7,10 @@ import pytest
 from vikat_hire.contracts.common import (
     RequirementCategory,
     RequirementImportance,
-    ScopeEvidenceCategory,
 )
 from vikat_hire.contracts.normalization import ExtractedTextBlock
 from vikat_hire.contracts.scope import ScopeEvidencePolarity
+from vikat_hire.contracts.scope import ScopeEvidenceCategory
 from vikat_hire.normalization.jd import normalize_jd
 
 
