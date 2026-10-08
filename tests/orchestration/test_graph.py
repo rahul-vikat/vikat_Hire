@@ -1,0 +1,306 @@
+from __future__ import annotations
+
+from decimal import Decimal
+
+import pytest
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.types import Command
+
+from vikat_hire.collection.github import GitHubCollector
+from vikat_hire.collection.linkedin import LinkedInCollector
+from vikat_hire.collection.portfolio import PortfolioCollector
+from vikat_hire.config.jd_classification import JDClassificationConfiguration
+from vikat_hire.contracts.common import (
+    AccessStatus,
+    DerivationMethod,
+    InputKind,
+    Provenance,
+    SourceType,
+)
+from vikat_hire.contracts.explanation import ExplanationResult
+from vikat_hire.contracts.inputs import DocumentInput, ScreeningInput
+from vikat_hire.contracts.state import ScreeningState
+from vikat_hire.normalization.document import extract_document_text
+from vikat_hire.orchestration.graph import (
+    JD_CONTENT_CONFIG_KEY,
+    RESUME_CONTENT_CONFIG_KEY,
+    ScreeningGraphConfigurationError,
+    ScreeningGraphDependencies,
+    build_screening_graph,
+    invoke_screening_graph,
+)
+from vikat_hire.orchestration.state import from_orchestration_state, to_orchestration_state
+
+
+class _Fetcher:
+    def __init__(self, text: str = "Python services") -> None:
+        self.text = text
+        self.calls: list[str] = []
+
+    def fetch(self, *, url: str) -> str:
+        self.calls.append(url)
+        return self.text
+
+
+def _dependencies(
+    *,
+    github_fetcher: _Fetcher | None = None,
+    portfolio_fetcher: _Fetcher | None = None,
+) -> ScreeningGraphDependencies:
+    return ScreeningGraphDependencies(
+        classification_configuration=JDClassificationConfiguration(
+            configuration_ref="jd-classification-test@1",
+            technical_indicators=("python",),
+            non_technical_indicators=("communications role",),
+        ),
+        linkedin_collector=LinkedInCollector(_Fetcher()),
+        github_collector=GitHubCollector(github_fetcher or _Fetcher()),
+        portfolio_collector=PortfolioCollector(portfolio_fetcher or _Fetcher()),
+        scoring_release="verifyhire-scoring@2.2.0",
+        policy_field_presence={
+            "certification": True,
+            "education": True,
+            "location": True,
+            "availability": True,
+        },
+        policy_configuration_ref="policy-test@1",
+        explanation_generator=lambda context: ExplanationResult(
+            screening_id=context.screening_id,
+            summary="Deterministic test explanation.",
+            dimensions=(),
+            generated_by="test",
+            evidence_refs=(),
+        ),
+    )
+
+
+def _state(*, technical: bool = False, with_external_urls: bool = False) -> ScreeningState:
+    screening_id = "graph-screening-1"
+    jd = DocumentInput(
+        input_id="jd-1",
+        kind=InputKind.JD,
+        filename="jd.txt",
+        media_type="text/plain",
+        content_hash="jd-hash",
+        storage_ref="opaque/jd",
+    )
+    resume = DocumentInput(
+        input_id="resume-1",
+        kind=InputKind.RESUME,
+        filename="resume.txt",
+        media_type="text/plain",
+        content_hash="resume-hash",
+        storage_ref="opaque/resume",
+    )
+    provenances = tuple(
+        Provenance(
+            provenance_id=f"{kind.value}-provenance",
+            source_type=source_type,
+            source_ref=document.input_id,
+            method=DerivationMethod.PARSER,
+            access_status=AccessStatus.AUTHORIZED,
+        )
+        for kind, source_type, document in (
+            (InputKind.JD, SourceType.JD_FILE, jd),
+            (InputKind.RESUME, SourceType.RESUME_FILE, resume),
+        )
+    )
+    external = {}
+    if with_external_urls:
+        external = {
+            "linkedin_url": "https://www.linkedin.com/in/graph-user",
+            "github_url": "https://github.com/graph-user",
+            "portfolio_url": "https://portfolio.example/profile",
+        }
+    return ScreeningState(
+        screening_id=screening_id,
+        screening_input=ScreeningInput(
+            screening_id=screening_id,
+            jd=jd,
+            resume=resume,
+            external_sources={"input_id": "external-1", **external},
+        ),
+        provenances=provenances,
+        current_node="start",
+    )
+
+
+def _invoke(graph, state: ScreeningState, *, jd: bytes, resume: bytes, thread_id: str):
+    return invoke_screening_graph(
+        graph,
+        state,
+        jd_content=jd,
+        resume_content=resume,
+        config={"configurable": {"thread_id": thread_id}},
+    )
+
+
+def test_graph_builds_with_injected_memory_checkpointer() -> None:
+    graph = build_screening_graph(
+        dependencies=_dependencies(),
+        checkpointer=MemorySaver(),
+    )
+
+    assert graph is not None
+    graph_edges = {(edge.source, edge.target) for edge in graph.get_graph().edges}
+    assert ("assemble_evidence", "evaluate_dimensions") in graph_edges
+
+
+def test_graph_rejects_malformed_dependencies() -> None:
+    with pytest.raises(ScreeningGraphConfigurationError, match="dependencies"):
+        build_screening_graph(dependencies=object())  # type: ignore[arg-type]
+
+
+def test_nontechnical_flow_skips_github_and_portfolio_and_preserves_seniority() -> None:
+    github_fetcher = _Fetcher()
+    portfolio_fetcher = _Fetcher()
+    graph = build_screening_graph(
+        dependencies=_dependencies(
+            github_fetcher=github_fetcher,
+            portfolio_fetcher=portfolio_fetcher,
+        ),
+        checkpointer=MemorySaver(),
+    )
+    state = _state()
+    jd = b"Must have: communications role\nWorks under supervision."
+    resume = b"Communications role\nWorked under supervision."
+
+    output = _invoke(graph, state, jd=jd, resume=resume, thread_id="nontechnical")
+    final_state, blocks, normalization = from_orchestration_state(output)
+
+    assert github_fetcher.calls == []
+    assert portfolio_fetcher.calls == []
+    assert len(blocks) == 2
+    assert normalization is not None
+    assert final_state.evaluation is not None
+    seniority = tuple(
+        item
+        for item in final_state.evaluation.dimensions
+        if item.dimension.value == "seniority_scope_alignment"
+    )
+    assert len(seniority) == 1
+    assert seniority[0].raw_value == Decimal("100")
+    assert final_state.score is not None
+    assert final_state.policy is not None
+    assert final_state.explanation is not None
+
+
+def test_technical_flow_runs_github_and_portfolio_in_order() -> None:
+    github_fetcher = _Fetcher("Python backend services")
+    portfolio_fetcher = _Fetcher("Python project portfolio")
+    graph = build_screening_graph(
+        dependencies=_dependencies(
+            github_fetcher=github_fetcher,
+            portfolio_fetcher=portfolio_fetcher,
+        ),
+        checkpointer=MemorySaver(),
+    )
+    output = _invoke(
+        graph,
+        _state(technical=True, with_external_urls=True),
+        jd=b"Must have: Python\nOwn services end-to-end.",
+        resume=b"Python\nOwned services end-to-end.",
+        thread_id="technical",
+    )
+    state, _, _ = from_orchestration_state(output)
+
+    assert github_fetcher.calls == ["https://github.com/graph-user"]
+    assert portfolio_fetcher.calls == ["https://portfolio.example/profile"]
+    assert state.evaluation is not None
+    assert state.score is not None
+
+
+def test_missing_documents_interrupt_and_resume_with_langgraph_command() -> None:
+    graph = build_screening_graph(dependencies=_dependencies(), checkpointer=MemorySaver())
+    state = _state()
+    initial = to_orchestration_state(state, extracted_blocks=())
+    config = {"configurable": {"thread_id": "resume-test"}}
+    interrupted = graph.invoke(initial, config=config)
+    assert "__interrupt__" in interrupted
+
+    jd_blocks = extract_document_text(
+        document=state.screening_input.jd,
+        content=b"Must have: communications role\nWorks under supervision.",
+        provenance_refs=(
+            next(
+                item.provenance_id
+                for item in state.provenances
+                if item.source_type is SourceType.JD_FILE
+            ),
+        ),
+    )
+    resume_blocks = extract_document_text(
+        document=state.screening_input.resume,
+        content=b"Communications role\nWorked under supervision.",
+        provenance_refs=(
+            next(
+                item.provenance_id
+                for item in state.provenances
+                if item.source_type is SourceType.RESUME_FILE
+            ),
+        ),
+    )
+    incomplete_payload = {
+        "screening_input": state.screening_input.model_dump(mode="json"),
+        "extracted_blocks": tuple(block.model_dump(mode="json") for block in jd_blocks),
+    }
+
+    still_interrupted = graph.invoke(Command(resume=incomplete_payload), config=config)
+    assert "__interrupt__" in still_interrupted
+
+    complete_payload = {
+        "screening_input": state.screening_input.model_dump(mode="json"),
+        "extracted_blocks": tuple(
+            block.model_dump(mode="json") for block in (*jd_blocks, *resume_blocks)
+        ),
+    }
+    completed = graph.invoke(Command(resume=complete_payload), config=config)
+    final_state, _, _ = from_orchestration_state(completed)
+    assert final_state.evaluation is not None
+
+
+def test_raw_bytes_are_not_part_of_domain_or_transport_state() -> None:
+    state = _state()
+    transport = to_orchestration_state(state, extracted_blocks=())
+    serialized = repr(transport)
+
+    assert JD_CONTENT_CONFIG_KEY not in transport
+    assert RESUME_CONTENT_CONFIG_KEY not in transport
+    assert b"raw JD" not in serialized.encode()
+    assert "content" not in state.screening_input.jd.model_fields_set
+    assert "content" not in state.screening_input.resume.model_fields_set
+
+
+def test_seniority_weight_is_applied_only_by_authoritative_scoring_layer() -> None:
+    graph = build_screening_graph(dependencies=_dependencies(), checkpointer=MemorySaver())
+    output = _invoke(
+        graph,
+        _state(),
+        jd=b"Must have: communications role\nWorks under supervision.",
+        resume=b"Communications role\nWorked under supervision.",
+        thread_id="weight-test",
+    )
+    state, _, _ = from_orchestration_state(output)
+
+    assert state.evaluation is not None
+    seniority = next(
+        item
+        for item in state.evaluation.dimensions
+        if item.dimension.value == "seniority_scope_alignment"
+    )
+    assert seniority.raw_value is None or isinstance(seniority.raw_value, Decimal)
+    assert state.score is not None
+    seniority_score = next(
+        item
+        for item in state.score.dimensions
+        if item.dimension.value == "seniority_scope_alignment"
+    )
+    assert seniority_score.weight == Decimal("10")
+    if seniority.resolution.value == "evaluated":
+        seniority_audit = next(
+            item
+            for item in state.score.audit
+            if item.dimension.value == "seniority_scope_alignment"
+        )
+        assert seniority_audit.weight == Decimal("10")
+        assert seniority_audit.configuration_ref == "verifyhire-scoring@2.2.0"
