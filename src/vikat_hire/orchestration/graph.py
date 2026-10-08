@@ -29,9 +29,12 @@ from vikat_hire.contracts.common import (
     RequirementImportance,
     SourceType,
 )
+from vikat_hire.contracts.evaluation import ExperienceRequirement
 from vikat_hire.contracts.normalization import NormalizationResult
 from vikat_hire.contracts.state import ScreeningState
 from vikat_hire.evaluation.dimensions import evaluate_dimension
+from vikat_hire.evaluation.experience import evaluate_jd_aligned_experience
+from vikat_hire.evaluation.experience_alignment import match_experience_records
 from vikat_hire.evaluation.jd_aligned_experience import (
     aggregate_jd_aligned_experience,
 )
@@ -289,7 +292,11 @@ def _require_normalization(transport: OrchestrationState) -> NormalizationResult
     return normalization
 
 
-def _require_dimensions_inputs(transport: OrchestrationState):
+def _require_dimensions_inputs(
+    transport: OrchestrationState,
+    *,
+    keyword_vocabularies: Mapping[str, KeywordDefinition] | None = None,
+):
     state, _, normalization = _read(transport)
     if normalization is None:
         raise ScreeningGraphConfigurationError("normalization is required")
@@ -363,13 +370,45 @@ def _require_dimensions_inputs(transport: OrchestrationState):
             matches=state.deterministic_semantic_matches,
         )
     )
+    experience_records = tuple(
+        record.to_evaluation_record()
+        for record in normalization.experience_records
+    )
+    experience_evaluation_items = []
+    for requirement in normalization.jd_experience_requirements:
+        experience_requirement = ExperienceRequirement(
+            requirement_id=requirement.requirement_id,
+            text=requirement.text,
+            importance=requirement.importance,
+            minimum_years=requirement.minimum_years,
+            canonical_skill_refs=requirement.canonical_refs,
+            provenance_refs=requirement.provenance_refs,
+        )
+        matched_record_ids = match_experience_records(
+            requirement=experience_requirement,
+            records=normalization.experience_records,
+            skills=normalization.skills,
+            responsibilities=normalization.responsibilities,
+            vocabulary=(keyword_vocabularies or {}).get(
+                requirement.requirement_id
+            ),
+        )
+        experience_evaluation_items.append(
+            evaluate_jd_aligned_experience(
+                records=experience_records,
+                requirement=experience_requirement,
+                matched_record_ids=matched_record_ids,
+                as_of_date=state.screening_input.created_at.date(),
+            )
+        )
+    experience_evaluations = tuple(experience_evaluation_items)
     dimensions.append(
         aggregate_jd_aligned_experience(
             requirement_ids=tuple(
                 requirement.requirement_id
                 for requirement in normalization.jd_experience_requirements
             ),
-            evaluations=(),
+            evaluations=experience_evaluations,
         )
     )
     return state, tuple(dimensions), normalization
@@ -562,7 +601,10 @@ def build_screening_graph(
         return _write(transport, result, blocks, normalization)
 
     def dimensions(transport: OrchestrationState):
-        state, dimension_values, normalization = _require_dimensions_inputs(transport)
+        state, dimension_values, normalization = _require_dimensions_inputs(
+            transport,
+            keyword_vocabularies=dependencies.keyword_vocabularies,
+        )
         contradiction_refs = (
             normalization.jd_scope_evidence
             and tuple(

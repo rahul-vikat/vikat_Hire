@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from calendar import monthrange
 from datetime import date
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 
 from vikat_hire.contracts import (
     DimensionResolution,
@@ -11,7 +11,6 @@ from vikat_hire.contracts import (
     ExperienceRecord,
     ExperienceRequirement,
 )
-
 
 MONTHS_PER_YEAR = Decimal("12")
 PERCENTAGE = Decimal("100")
@@ -321,7 +320,7 @@ def evaluate_jd_aligned_experience(
         dict.fromkeys(
             evidence_ref
             for record in records
-            if record.record_id in contributing_records
+            if record.record_id in matched_record_ids
             for evidence_ref in record.evidence_refs
         )
     )
@@ -333,7 +332,7 @@ def evaluate_jd_aligned_experience(
                 *(
                     provenance_ref
                     for record in records
-                    if record.record_id in contributing_records
+                    if record.record_id in matched_record_ids
                     for provenance_ref in record.provenance_refs
                 ),
             )
