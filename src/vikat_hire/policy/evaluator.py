@@ -1,45 +1,42 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
-
 from vikat_hire.contracts.common import DimensionResolution, EvidenceConfidence, WorkflowStatus
 from vikat_hire.contracts.evaluation import EvaluationResult
-from vikat_hire.contracts.policy import GateResult, PolicyResult, ReviewRequest
+from vikat_hire.contracts.policy import GateResult, GateStatus, PolicyResult, ReviewRequest
 from vikat_hire.contracts.scoring import ScoreResult
-
-GATE_CERTIFICATION = "certification"
-GATE_EDUCATION = "education"
-GATE_LOCATION = "location"
-GATE_AVAILABILITY = "availability"
-MANDATORY_GATES = (GATE_CERTIFICATION, GATE_EDUCATION, GATE_LOCATION, GATE_AVAILABILITY)
-
-
-def _build_presence_gate(*, name: str, present: bool, configuration_ref: str) -> GateResult:
-    return GateResult(name=name, passed=present, requirement_refs=(name,), evidence_refs=(), rationale=f"Required field '{name}' is {'present' if present else 'missing'}.", configuration_ref=configuration_ref)
-
-
-def build_mandatory_gates(*, field_presence: Mapping[str, bool], configuration_ref: str) -> tuple[GateResult, ...]:
-    unknown_fields = set(field_presence) - set(MANDATORY_GATES)
-    if unknown_fields:
-        raise ValueError("field_presence contains unsupported policy fields: " + ", ".join(sorted(unknown_fields)))
-    return tuple(_build_presence_gate(name=name, present=field_presence.get(name, False), configuration_ref=configuration_ref) for name in MANDATORY_GATES)
+from vikat_hire.policy.gates import MANDATORY_GATES
 
 
 def _has_material_review(*, review_requests: tuple[ReviewRequest, ...]) -> bool:
     return any(request.blocking for request in review_requests)
 
 
-def _confidence_level(*, review_requests: tuple[ReviewRequest, ...], evaluation: EvaluationResult | None, score: ScoreResult | None) -> str:
+def _confidence_level(
+    *,
+    review_requests: tuple[ReviewRequest, ...],
+    evaluation: EvaluationResult | None,
+    score: ScoreResult | None,
+) -> str:
     if _has_material_review(review_requests=review_requests):
         return EvidenceConfidence.LOW.value
     if evaluation is None or score is None or not evaluation.dimensions:
         return EvidenceConfidence.MEDIUM.value
-    if any(dimension.resolution is DimensionResolution.EXCLUDED for dimension in evaluation.dimensions):
+    if any(
+        dimension.resolution is DimensionResolution.EXCLUDED for dimension in evaluation.dimensions
+    ):
         return EvidenceConfidence.MEDIUM.value
     return EvidenceConfidence.HIGH.value
 
 
-def build_policy_result(*, screening_id: str, gates: tuple[GateResult, ...], evaluation: EvaluationResult | None, score: ScoreResult | None, review_requests: tuple[ReviewRequest, ...], configuration_ref: str) -> PolicyResult:
+def build_policy_result(
+    *,
+    screening_id: str,
+    gates: tuple[GateResult, ...],
+    evaluation: EvaluationResult | None,
+    score: ScoreResult | None,
+    review_requests: tuple[ReviewRequest, ...],
+    configuration_ref: str,
+) -> PolicyResult:
     expected = set(MANDATORY_GATES)
     actual = {gate.name for gate in gates}
     if actual != expected:
@@ -50,14 +47,26 @@ def build_policy_result(*, screening_id: str, gates: tuple[GateResult, ...], eva
             parts.append("missing=" + ",".join(sorted(missing)))
         if unexpected:
             parts.append("unexpected=" + ",".join(sorted(unexpected)))
-        raise ValueError("policy gates must contain exactly the four mandatory gates: " + "; ".join(parts))
+        raise ValueError(
+            "policy gates must contain exactly the four mandatory gates: " + "; ".join(parts)
+        )
     if len(gates) != len(MANDATORY_GATES):
         raise ValueError("policy gates must contain each mandatory gate exactly once")
-    failed = any(not gate.passed for gate in gates)
+    failed = any(gate.status is GateStatus.FAIL for gate in gates)
     if failed:
         status, eligible = WorkflowStatus.FAILED, False
     elif review_requests:
         status, eligible = WorkflowStatus.REVIEW_REQUIRED, True
     else:
         status, eligible = WorkflowStatus.COMPLETED, True
-    return PolicyResult(screening_id=screening_id, gates=gates, review_requests=review_requests, workflow_status=status, suitability_eligible=eligible, confidence_level=_confidence_level(review_requests=review_requests, evaluation=evaluation, score=score), configuration_ref=configuration_ref)
+    return PolicyResult(
+        screening_id=screening_id,
+        gates=gates,
+        review_requests=review_requests,
+        workflow_status=status,
+        suitability_eligible=eligible,
+        confidence_level=_confidence_level(
+            review_requests=review_requests, evaluation=evaluation, score=score
+        ),
+        configuration_ref=configuration_ref,
+    )

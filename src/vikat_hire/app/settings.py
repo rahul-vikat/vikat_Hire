@@ -56,15 +56,6 @@ class ApplicationSettings(BaseSettings):
     )
 
     policy_configuration_ref: str = Field(validation_alias="VIKATHIRE_POLICY_CONFIGURATION_REF")
-    policy_certification_present: bool = Field(
-        validation_alias="VIKATHIRE_POLICY_CERTIFICATION_PRESENT"
-    )
-    policy_education_present: bool = Field(validation_alias="VIKATHIRE_POLICY_EDUCATION_PRESENT")
-    policy_location_present: bool = Field(validation_alias="VIKATHIRE_POLICY_LOCATION_PRESENT")
-    policy_availability_present: bool = Field(
-        validation_alias="VIKATHIRE_POLICY_AVAILABILITY_PRESENT"
-    )
-
     api_max_request_bytes: int = Field(
         default=20 * 1024 * 1024,
         validation_alias="VIKATHIRE_API_MAX_REQUEST_BYTES",
@@ -163,15 +154,6 @@ class ApplicationSettings(BaseSettings):
     @property
     def non_technical_indicators(self) -> tuple[str, ...]:
         return _split_indicators(self.jd_non_technical_indicators)
-
-    @property
-    def policy_field_presence(self) -> dict[str, bool]:
-        return {
-            "certification": self.policy_certification_present,
-            "education": self.policy_education_present,
-            "location": self.policy_location_present,
-            "availability": self.policy_availability_present,
-        }
 
 
 def _split_indicators(value: str) -> tuple[str, ...]:

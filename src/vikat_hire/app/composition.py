@@ -115,7 +115,6 @@ def create_production_app(
                 github_collector=GitHubCollector(github_fetcher),
                 portfolio_collector=PortfolioCollector(portfolio_fetcher),
                 scoring_release=SCORING_RELEASE_2_2_0.release,
-                policy_field_presence=runtime_settings.policy_field_presence,
                 policy_configuration_ref=runtime_settings.policy_configuration_ref,
                 explanation_generator=explanation_generator,
             )

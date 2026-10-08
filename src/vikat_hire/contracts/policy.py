@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from enum import StrEnum
 
 from pydantic import Field
 
@@ -13,12 +14,18 @@ from .common import (
 )
 
 
+class GateStatus(StrEnum):
+    PASS = "PASS"
+    FAIL = "FAIL"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+
+
 class GateResult(ContractModel):
     gate_id: str = Field(default_factory=new_id)
 
     name: str
 
-    passed: bool
+    status: GateStatus
 
     requirement_refs: tuple[str, ...] = ()
     evidence_refs: tuple[str, ...] = ()

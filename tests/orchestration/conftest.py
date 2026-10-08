@@ -20,9 +20,11 @@ from vikat_hire.contracts.evaluation import DimensionEvaluation, EvaluationResul
 from vikat_hire.contracts.evidence import Evidence
 from vikat_hire.contracts.explanation import ExplanationResult
 from vikat_hire.contracts.inputs import DocumentInput, ScreeningInput
+from vikat_hire.contracts.normalization import NormalizationResult
 from vikat_hire.contracts.state import ScreeningState
 from vikat_hire.normalization.document import extract_document_text
-from vikat_hire.policy.evaluator import build_mandatory_gates, build_policy_result
+from vikat_hire.policy.evaluator import build_policy_result
+from vikat_hire.policy.gates import evaluate_mandatory_gates
 from vikat_hire.scoring import calculate_score
 
 
@@ -81,10 +83,8 @@ def screening_state():
         score=score,
         review_requests=(),
         configuration_ref="policy-1",
-        gates=build_mandatory_gates(
-            field_presence=dict.fromkeys(
-                ("certification", "education", "location", "availability"), True
-            ),
+        gates=evaluate_mandatory_gates(
+            normalization=NormalizationResult(screening_id="screening-1"),
             configuration_ref="policy-1",
         ),
     )

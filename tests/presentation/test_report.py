@@ -11,7 +11,7 @@ from vikat_hire.contracts.common import (
 )
 from vikat_hire.contracts.evaluation import DimensionEvaluation, EvaluationResult
 from vikat_hire.contracts.inputs import DocumentInput, ScreeningInput
-from vikat_hire.contracts.policy import PolicyResult
+from vikat_hire.contracts.policy import GateResult, GateStatus, PolicyResult
 from vikat_hire.contracts.scoring import DimensionScore, ScoreAudit, ScoreResult
 from vikat_hire.contracts.state import ScreeningState
 from vikat_hire.presentation.report import (
@@ -104,27 +104,31 @@ def test_report_preserves_authoritative_evaluation_score_and_policy() -> None:
     )
     policy = PolicyResult(
         screening_id=state.screening_id,
-        gates=(),
+        gates=(
+            GateResult(
+                name="education",
+                status=GateStatus.NOT_APPLICABLE,
+                rationale="No education requirement applies.",
+                configuration_ref="policy@1",
+            ),
+        ),
         review_requests=(),
         workflow_status=WorkflowStatus.COMPLETED,
         suitability_eligible=True,
         confidence_level="high",
         configuration_ref="policy@1",
     )
-    state = state.model_copy(
-        update={"evaluation": evaluation, "score": score, "policy": policy}
-    )
+    state = state.model_copy(update={"evaluation": evaluation, "score": score, "policy": policy})
 
     report = build_screening_report(state)
 
     assert report.evaluation is evaluation
     assert report.score is score
     assert report.policy is policy
+    assert report.policy.gates[0].status is GateStatus.NOT_APPLICABLE
     assert report.workflow_status is WorkflowStatus.COMPLETED
     assert report.score.score == Decimal("80")
-    assert report.score.audit[0].input_evaluation_ref == (
-        evaluation.dimensions[0].dimension_id
-    )
+    assert report.score.audit[0].input_evaluation_ref == (evaluation.dimensions[0].dimension_id)
 
 
 def test_report_rejects_cross_screening_authoritative_artifact() -> None:

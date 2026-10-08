@@ -100,7 +100,6 @@ from vikat_hire.orchestration.state import (
     from_orchestration_state,
     to_orchestration_state,
 )
-from vikat_hire.policy.evaluator import MANDATORY_GATES
 
 JD_CONTENT_CONFIG_KEY = "vikat_hire_jd_content"
 RESUME_CONTENT_CONFIG_KEY = "vikat_hire_resume_content"
@@ -119,7 +118,6 @@ class ScreeningGraphDependencies:
     github_collector: GitHubCollector
     portfolio_collector: PortfolioCollector
     scoring_release: str
-    policy_field_presence: Mapping[str, bool]
     policy_configuration_ref: str
     explanation_generator: ExplanationProvider
     keyword_vocabularies: Mapping[str, KeywordDefinition] | None = None
@@ -155,15 +153,6 @@ class ScreeningGraphDependencies:
             raise ScreeningGraphConfigurationError(
                 "llm_semantic_matcher must be an LLMSemanticMatcher or None"
             )
-        if self.policy_field_presence is None:
-            raise ScreeningGraphConfigurationError("policy_field_presence is required")
-        unknown_fields = set(self.policy_field_presence) - set(MANDATORY_GATES)
-        if unknown_fields:
-            raise ScreeningGraphConfigurationError(
-                "unsupported policy field names: " + ", ".join(sorted(unknown_fields))
-            )
-        if any(not isinstance(value, bool) for value in self.policy_field_presence.values()):
-            raise ScreeningGraphConfigurationError("policy_field_presence values must be booleans")
         if self.keyword_vocabularies is not None:
             if any(
                 not isinstance(key, str)
@@ -371,8 +360,7 @@ def _require_dimensions_inputs(
         )
     )
     experience_records = tuple(
-        record.to_evaluation_record()
-        for record in normalization.experience_records
+        record.to_evaluation_record() for record in normalization.experience_records
     )
     experience_evaluation_items = []
     for requirement in normalization.jd_experience_requirements:
@@ -389,9 +377,7 @@ def _require_dimensions_inputs(
             records=normalization.experience_records,
             skills=normalization.skills,
             responsibilities=normalization.responsibilities,
-            vocabulary=(keyword_vocabularies or {}).get(
-                requirement.requirement_id
-            ),
+            vocabulary=(keyword_vocabularies or {}).get(requirement.requirement_id),
         )
         experience_evaluation_items.append(
             evaluate_jd_aligned_experience(
@@ -632,9 +618,10 @@ def build_screening_graph(
 
     def policy(transport: OrchestrationState):
         state, blocks, normalization = _read(transport)
+        normalized = _require_normalization(transport)
         result = evaluate_policy_node(
             state,
-            field_presence=dependencies.policy_field_presence,
+            normalization=normalized,
             configuration_ref=dependencies.policy_configuration_ref,
             review_requests=state.pending_reviews,
         )

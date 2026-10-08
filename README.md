@@ -71,10 +71,15 @@ Required settings:
 | `VIKATHIRE_JD_NON_TECHNICAL_INDICATORS` | Approved comma-separated non-technical indicators |
 | `VIKATHIRE_JD_CLASSIFICATION_CONFIGURATION_REF` | Classification configuration identity |
 | `VIKATHIRE_POLICY_CONFIGURATION_REF` | Policy configuration identity |
-| `VIKATHIRE_POLICY_CERTIFICATION_PRESENT` | Existing certification gate configuration |
-| `VIKATHIRE_POLICY_EDUCATION_PRESENT` | Existing education gate configuration |
-| `VIKATHIRE_POLICY_LOCATION_PRESENT` | Existing location gate configuration |
-| `VIKATHIRE_POLICY_AVAILABILITY_PRESENT` | Existing availability gate configuration |
+
+Certification, education, location, and availability gates are evaluated per
+screening from normalized JD requirements. A category without a normalized JD
+requirement is `NOT_APPLICABLE`. An applicable requirement fails unless an
+approved deterministic evidence matcher establishes satisfaction. The education
+matcher and structured certification/location/availability evidence contracts
+are not yet approved, so those applicable gates currently fail closed. Generic
+candidate statements do not make a gate pass. Gate failures do not create review
+requests.
 
 Optional/configurable operational values are `VIKATHIRE_GITHUB_API_TOKEN`,
 `VIKATHIRE_GROQ_TEMPERATURE`, `VIKATHIRE_GROQ_MAX_TOKENS`,

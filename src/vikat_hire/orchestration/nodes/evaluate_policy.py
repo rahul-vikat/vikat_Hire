@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
-
+from vikat_hire.contracts.normalization import NormalizationResult
 from vikat_hire.contracts.policy import ReviewRequest
 from vikat_hire.contracts.state import ScreeningState
 from vikat_hire.policy.evaluator import (
-    build_mandatory_gates,
     build_policy_result,
 )
+from vikat_hire.policy.gates import evaluate_mandatory_gates
 
 
 class PolicyEvaluationNodeError(ValueError):
@@ -17,7 +16,7 @@ class PolicyEvaluationNodeError(ValueError):
 def evaluate_policy_node(
     state: ScreeningState,
     *,
-    field_presence: Mapping[str, bool],
+    normalization: NormalizationResult,
     configuration_ref: str,
     review_requests: tuple[ReviewRequest, ...] = (),
 ) -> ScreeningState:
@@ -31,19 +30,21 @@ def evaluate_policy_node(
     The node does not:
     - calculate or modify the score,
     - recalculate dimension values,
-    - infer missing field presence,
     - create review requests,
     - determine eligibility independently.
     """
 
     if not isinstance(state, ScreeningState):
-        raise PolicyEvaluationNodeError(
-            "state must be a ScreeningState"
-        )
+        raise PolicyEvaluationNodeError("state must be a ScreeningState")
 
     if not configuration_ref.strip():
+        raise PolicyEvaluationNodeError("configuration_ref must not be blank")
+
+    if not isinstance(normalization, NormalizationResult):
+        raise PolicyEvaluationNodeError("normalization must be a NormalizationResult")
+    if normalization.screening_id != state.screening_id:
         raise PolicyEvaluationNodeError(
-            "configuration_ref must not be blank"
+            "normalization screening_id does not match state screening_id"
         )
 
     if state.evaluation is not None:
@@ -54,12 +55,10 @@ def evaluate_policy_node(
 
     if state.score is not None:
         if state.score.screening_id != state.screening_id:
-            raise PolicyEvaluationNodeError(
-                "score screening_id does not match state screening_id"
-            )
+            raise PolicyEvaluationNodeError("score screening_id does not match state screening_id")
 
-    gates = build_mandatory_gates(
-        field_presence=field_presence,
+    gates = evaluate_mandatory_gates(
+        normalization=normalization,
         configuration_ref=configuration_ref,
     )
 

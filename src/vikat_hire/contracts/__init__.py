@@ -10,8 +10,8 @@ from .common import (
     ExclusionReason,
     InputKind,
     MatchStatus,
-    ReviewReason,
     RequirementImportance,
+    ReviewReason,
     SourceReliability,
     WorkflowStatus,
 )
@@ -24,15 +24,15 @@ from .evaluation import (
     RequirementEvaluation,
     RequirementGroupEvaluation,
 )
+from .evidence import Claim, ClaimReconciliation, Evidence, Provenance
 from .explanation import (
     DimensionExplanation,
     ExplanationContext,
     ExplanationResult,
 )
-from .evidence import Claim, ClaimReconciliation, Evidence, Provenance
 from .inputs import DocumentInput, ExternalSourceInput, ScreeningInput
 from .matching import KeywordMatch, LLMSemanticProposal, SemanticMatch
-from .policy import GateResult, PolicyResult, ReviewRequest
+from .policy import GateResult, GateStatus, PolicyResult, ReviewRequest
 from .scoring import DimensionScore, ScoreAudit, ScoreResult, ScoringConfiguration
 from .state import ClassificationResult, ScreeningState
 
@@ -65,6 +65,7 @@ __all__ = [
     "RequirementGroupEvaluation",
     "RequirementImportance",
     "GateResult",
+    "GateStatus",
     "InputKind",
     "KeywordMatch",
     "LLMSemanticProposal",

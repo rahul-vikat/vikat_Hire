@@ -30,13 +30,7 @@ class _Fetcher:
         return ""
 
 
-def _graph(*, fail_location_gate: bool = False):
-    field_presence = {
-        "certification": True,
-        "education": True,
-        "location": not fail_location_gate,
-        "availability": True,
-    }
+def _graph():
     return build_screening_graph(
         dependencies=ScreeningGraphDependencies(
             classification_configuration=JDClassificationConfiguration(
@@ -48,7 +42,6 @@ def _graph(*, fail_location_gate: bool = False):
             github_collector=GitHubCollector(_Fetcher()),
             portfolio_collector=PortfolioCollector(_Fetcher()),
             scoring_release="verifyhire-scoring@2.2.0",
-            policy_field_presence=field_presence,
             policy_configuration_ref="policy-test@1",
             explanation_generator=lambda context: ExplanationResult(
                 screening_id=context.screening_id,
@@ -269,11 +262,13 @@ def test_missing_document_bytes_interrupt_and_resume() -> None:
 
 
 def test_api_returns_failed_policy_without_recalculating_result() -> None:
-    client = TestClient(create_app(graph=_graph(fail_location_gate=True)))
+    client = TestClient(create_app(graph=_graph()))
     payload = _payload("api-failed-policy")
     payload.update(
         {
-            "jd_content": _content("Must have: Python\nOwn services end-to-end."),
+            "jd_content": _content(
+                "Must have: Python\nRequired: location in Toronto\nOwn services end-to-end."
+            ),
             "resume_content": _content("Python developer\nOwned services end-to-end."),
         }
     )

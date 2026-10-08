@@ -65,12 +65,6 @@ def _graph(checkpointer: PostgresSaver):
             github_collector=GitHubCollector(_Fetcher()),
             portfolio_collector=PortfolioCollector(_Fetcher()),
             scoring_release="verifyhire-scoring@2.2.0",
-            policy_field_presence={
-                "certification": True,
-                "education": True,
-                "location": True,
-                "availability": True,
-            },
             policy_configuration_ref="postgres-test-policy@1",
             explanation_generator=lambda context: ExplanationResult(
                 screening_id=context.screening_id,
@@ -249,10 +243,6 @@ def test_production_composition_starts_with_postgres_checkpointer() -> None:
         VIKATHIRE_JD_NON_TECHNICAL_INDICATORS="recruiting, communications",
         VIKATHIRE_JD_CLASSIFICATION_CONFIGURATION_REF="integration-classification@1",
         VIKATHIRE_POLICY_CONFIGURATION_REF="integration-policy@1",
-        VIKATHIRE_POLICY_CERTIFICATION_PRESENT=True,
-        VIKATHIRE_POLICY_EDUCATION_PRESENT=True,
-        VIKATHIRE_POLICY_LOCATION_PRESENT=True,
-        VIKATHIRE_POLICY_AVAILABILITY_PRESENT=True,
     )
     app = create_production_app(settings=settings)
 

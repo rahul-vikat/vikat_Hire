@@ -85,12 +85,6 @@ def _dependencies(
         github_collector=GitHubCollector(github_fetcher or _Fetcher()),
         portfolio_collector=PortfolioCollector(portfolio_fetcher or _Fetcher()),
         scoring_release="verifyhire-scoring@2.2.0",
-        policy_field_presence={
-            "certification": True,
-            "education": True,
-            "location": True,
-            "availability": True,
-        },
         policy_configuration_ref="policy-test@1",
         explanation_generator=lambda context: ExplanationResult(
             screening_id=context.screening_id,

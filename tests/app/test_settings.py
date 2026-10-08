@@ -24,10 +24,6 @@ def _values() -> dict[str, str]:
         "VIKATHIRE_JD_NON_TECHNICAL_INDICATORS": "communications, recruiting",
         "VIKATHIRE_JD_CLASSIFICATION_CONFIGURATION_REF": "classification-test@1",
         "VIKATHIRE_POLICY_CONFIGURATION_REF": "policy-test@1",
-        "VIKATHIRE_POLICY_CERTIFICATION_PRESENT": "true",
-        "VIKATHIRE_POLICY_EDUCATION_PRESENT": "true",
-        "VIKATHIRE_POLICY_LOCATION_PRESENT": "true",
-        "VIKATHIRE_POLICY_AVAILABILITY_PRESENT": "true",
     }
 
 
@@ -37,18 +33,17 @@ def test_application_settings_validate_and_normalize_postgres_url() -> None:
     assert settings.psycopg_conninfo == "postgresql://user:secret@localhost:5432/vikathire"
     assert settings.technical_indicators == ("Python", "APIs")
     assert settings.non_technical_indicators == ("communications", "recruiting")
-    assert settings.policy_field_presence == {
-        "certification": True,
-        "education": True,
-        "location": True,
-        "availability": True,
-    }
 
 
-def test_application_settings_require_production_configuration() -> None:
+def test_application_settings_no_longer_require_global_gate_booleans() -> None:
     values = _values()
-    del values["VIKATHIRE_POLICY_LOCATION_PRESENT"]
+    settings = ApplicationSettings(_env_file=None, **values)
+    assert settings.policy_configuration_ref == "policy-test@1"
 
+
+def test_application_settings_require_policy_configuration_reference() -> None:
+    values = _values()
+    del values["VIKATHIRE_POLICY_CONFIGURATION_REF"]
     with pytest.raises(ValidationError):
         ApplicationSettings(_env_file=None, **values)
 
