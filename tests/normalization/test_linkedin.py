@@ -147,6 +147,9 @@ def test_normalizes_documented_harvestapi_employment_fixture() -> None:
     record = records[0]
     assert record.role == "Software Engineer"
     assert record.employer == "Example Company"
+    assert record.company_id == "company-123"
+    assert record.company_universal_name == "example-company"
+    assert record.company_linkedin_url == "https://www.linkedin.com/company/example-company/"
     assert record.start_date is not None
     assert (record.start_date.year, record.start_date.month) == (2024, 1)
     assert record.current is True

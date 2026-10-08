@@ -316,6 +316,17 @@ def _normalize_experience_record(
         return NormalizedExperienceRecord(
             record_id=f"{block.block_id}:experience:{index}",
             employer=company,
+            company_id=_optional_text(raw_record, "companyId", index=index),
+            company_universal_name=_optional_text(
+                raw_record,
+                "companyUniversalName",
+                index=index,
+            ),
+            company_linkedin_url=_optional_text(
+                raw_record,
+                "companyLinkedinUrl",
+                index=index,
+            ),
             role=position,
             start_date=start_date,
             end_date=end_date,

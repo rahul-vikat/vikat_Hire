@@ -5,6 +5,9 @@
       {
         "position": "Software Engineer",
         "companyName": "Example Company",
+        "companyId": "company-123",
+        "companyUniversalName": "example-company",
+        "companyLinkedinUrl": "https://www.linkedin.com/company/example-company/",
         "description": "Built and maintained backend services.",
         "skills": ["Python", "FastAPI"],
         "startDate": {

@@ -146,6 +146,9 @@ class NormalizedExperienceRecord(ContractModel):
     record_id: str = Field(min_length=1)
 
     employer: str | None = None
+    company_id: str | None = None
+    company_universal_name: str | None = None
+    company_linkedin_url: str | None = None
     role: str | None = None
 
     start_date: date | None = None
@@ -222,10 +225,6 @@ class NormalizedEducationRecord(ContractModel):
     degree: str | None = None
     field_of_study: str | None = None
     period: str | None = None
-    start_date: date | None = None
-    end_date: date | None = None
-    date_precision: DatePrecision = DatePrecision.UNKNOWN
-    current: bool = False
     start_date: date | None = None
     end_date: date | None = None
     date_precision: DatePrecision = DatePrecision.UNKNOWN
