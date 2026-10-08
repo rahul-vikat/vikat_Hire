@@ -32,10 +32,14 @@ from vikat_hire.contracts.common import (
 from vikat_hire.contracts.normalization import NormalizationResult
 from vikat_hire.contracts.state import ScreeningState
 from vikat_hire.evaluation.dimensions import evaluate_dimension
+from vikat_hire.evaluation.jd_aligned_experience import (
+    aggregate_jd_aligned_experience,
+)
 from vikat_hire.evaluation.keyword_matcher import KeywordDefinition
 from vikat_hire.evaluation.must_have import evaluate_must_have
 from vikat_hire.evaluation.nice_to_have import evaluate_nice_to_have
 from vikat_hire.evaluation.requirement import evaluate_requirement
+from vikat_hire.evaluation.semantic_fit import aggregate_semantic_fit
 from vikat_hire.normalization.external import normalize_external_sources
 from vikat_hire.orchestration.interrupts import (
     interrupt_missing_input,
@@ -352,6 +356,22 @@ def _require_dimensions_inputs(transport: OrchestrationState):
                 ),
             )
         )
+
+    dimensions.append(
+        aggregate_semantic_fit(
+            requirements=requirements,
+            matches=state.deterministic_semantic_matches,
+        )
+    )
+    dimensions.append(
+        aggregate_jd_aligned_experience(
+            requirement_ids=tuple(
+                requirement.requirement_id
+                for requirement in normalization.jd_experience_requirements
+            ),
+            evaluations=(),
+        )
+    )
     return state, tuple(dimensions), normalization
 
 

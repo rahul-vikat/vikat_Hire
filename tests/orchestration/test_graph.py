@@ -13,6 +13,8 @@ from vikat_hire.config.jd_classification import JDClassificationConfiguration
 from vikat_hire.contracts.common import (
     AccessStatus,
     DerivationMethod,
+    DimensionName,
+    DimensionResolution,
     InputKind,
     Provenance,
     SourceType,
@@ -20,6 +22,10 @@ from vikat_hire.contracts.common import (
 from vikat_hire.contracts.explanation import ExplanationResult
 from vikat_hire.contracts.inputs import DocumentInput, ScreeningInput
 from vikat_hire.contracts.state import ScreeningState
+from vikat_hire.evaluation.jd_aligned_experience import (
+    aggregate_jd_aligned_experience,
+)
+from vikat_hire.evaluation.semantic_fit import aggregate_semantic_fit
 from vikat_hire.normalization.document import extract_document_text
 from vikat_hire.orchestration.graph import (
     JD_CONTENT_CONFIG_KEY,
@@ -173,13 +179,42 @@ def test_nontechnical_flow_skips_github_and_portfolio_and_preserves_seniority() 
     assert len(blocks) == 2
     assert normalization is not None
     assert final_state.evaluation is not None
+    assert normalization is not None
+    dimensions = {
+        item.dimension: item
+        for item in final_state.evaluation.dimensions
+    }
+    expected_semantic = aggregate_semantic_fit(
+        requirements=normalization.jd_requirements,
+        matches=final_state.deterministic_semantic_matches,
+    )
+    semantic = dimensions[DimensionName.SEMANTIC_FIT]
+    assert semantic.model_dump(exclude={"dimension_id", "created_at"}) == (
+        expected_semantic.model_dump(exclude={"dimension_id", "created_at"})
+    )
+    expected_experience = aggregate_jd_aligned_experience(
+        requirement_ids=tuple(
+            requirement.requirement_id
+            for requirement in normalization.jd_experience_requirements
+        ),
+        evaluations=(),
+    )
+    experience = dimensions[DimensionName.JD_ALIGNED_EXPERIENCE]
+    assert experience.model_dump(exclude={"dimension_id", "created_at"}) == (
+        expected_experience.model_dump(exclude={"dimension_id", "created_at"})
+    )
+    assert experience.resolution is DimensionResolution.EXCLUDED
+    assert experience.raw_value is None
     seniority = tuple(
         item
         for item in final_state.evaluation.dimensions
-        if item.dimension.value == "seniority_scope_alignment"
+        if item.dimension is DimensionName.SENIORITY_SCOPE_ALIGNMENT
     )
     assert len(seniority) == 1
     assert seniority[0].raw_value == Decimal("100")
+    must_have = dimensions[DimensionName.MUST_HAVE_COVERAGE]
+    assert must_have.resolution is DimensionResolution.EXCLUDED
+    assert must_have.raw_value is None
     assert final_state.score is not None
     assert final_state.policy is not None
     assert final_state.explanation is not None
@@ -208,6 +243,13 @@ def test_technical_flow_runs_github_and_portfolio_in_order() -> None:
     assert portfolio_fetcher.calls == ["https://portfolio.example/profile"]
     assert state.evaluation is not None
     assert state.score is not None
+    dimensions = {
+        item.dimension: item
+        for item in state.evaluation.dimensions
+    }
+    assert DimensionName.SEMANTIC_FIT in dimensions
+    assert DimensionName.JD_ALIGNED_EXPERIENCE in dimensions
+    assert DimensionName.MUST_HAVE_COVERAGE in dimensions
 
 
 def test_missing_documents_interrupt_and_resume_with_langgraph_command() -> None:
