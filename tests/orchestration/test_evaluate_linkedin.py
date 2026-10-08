@@ -59,6 +59,16 @@ def _provenance(
     )
 
 
+def _resume_provenance() -> Provenance:
+    return Provenance(
+        provenance_id="resume-provenance",
+        source_type=SourceType.RESUME_FILE,
+        source_ref="resume-source",
+        method=DerivationMethod.PARSER,
+        access_status=AccessStatus.AUTHORIZED,
+    )
+
+
 def _claim(
     claim_id: str,
 ) -> Claim:
@@ -109,7 +119,7 @@ def test_evaluate_linkedin_node_creates_evaluation() -> None:
     state = state.model_copy(
         update={
             "claims": (claim,),
-            "provenances": (linkedin_provenance,),
+            "provenances": (_resume_provenance(), linkedin_provenance),
             "evidence": (evidence,),
         }
     )
@@ -147,7 +157,9 @@ def test_evaluate_linkedin_node_preserves_existing_dimensions() -> None:
     result = evaluate_linkedin_node(state)
 
     assert result.evaluation is not None
-    assert result.evaluation.dimensions == (existing,)
+    assert result.evaluation.dimensions[0].model_dump(
+        exclude={"dimension_id", "created_at"}
+    ) == existing.model_dump(exclude={"dimension_id", "created_at"})
 
 
 def test_evaluate_linkedin_node_rejects_mismatched_evaluation() -> None:
