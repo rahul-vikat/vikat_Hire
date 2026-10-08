@@ -3,11 +3,13 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Mapping
 from contextlib import AbstractAsyncContextManager
+from hashlib import sha256
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Response, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Response, UploadFile, status
 from fastapi.responses import JSONResponse
 from langgraph.types import Command
+from pydantic import ValidationError
 
 from vikat_hire.app.dependencies import (
     ApplicationDependencyError,
@@ -18,9 +20,13 @@ from vikat_hire.app.dependencies import (
     provide_screening_graph,
     report_from_graph_values,
 )
-from vikat_hire.contracts.common import WorkflowStatus
+from vikat_hire.collection.resume_extractor import extract_resume_text
+from vikat_hire.contracts.common import InputKind, SourceType, WorkflowStatus, new_id
+from vikat_hire.contracts.inputs import DocumentInput, ExternalSourceInput, ScreeningInput
+from vikat_hire.normalization.document import extract_document_text
 from vikat_hire.orchestration.graph import invoke_screening_graph
 from vikat_hire.orchestration.interrupts import InputInterruptionError, InputResume
+from vikat_hire.orchestration.state import from_orchestration_state
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +118,162 @@ def _response_status(result: ScreeningAPIResponse) -> int:
     return status.HTTP_200_OK
 
 
+def _document_from_upload(
+    upload: UploadFile,
+    *,
+    kind: InputKind,
+    input_id: str | None = None,
+) -> tuple[DocumentInput, bytes]:
+    content = upload.file.read()
+    if not content:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="uploaded file is empty"
+        )
+    safe_filename = (upload.filename or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
+    if not safe_filename:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="uploaded file must have a filename",
+        )
+    document_id = input_id or new_id()
+    document = DocumentInput(
+        input_id=document_id,
+        kind=kind,
+        filename=safe_filename,
+        media_type=upload.content_type or "application/octet-stream",
+        content_hash=sha256(content).hexdigest(),
+        storage_ref=f"upload:{document_id}",
+    )
+    return document, content
+
+
+def _provenance_for_document(
+    state, document: DocumentInput, source_type: SourceType
+) -> tuple[str, ...]:
+    refs = tuple(
+        item.provenance_id
+        for item in state.provenances
+        if item.source_type is source_type and item.source_ref == document.input_id
+    )
+    if len(refs) != 1:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"screening checkpoint has invalid {document.kind.value} provenance",
+        )
+    return refs
+
+
+def _start_screening(
+    *,
+    screening_input: ScreeningInput,
+    jd_content: bytes | None,
+    resume_content: bytes | None,
+    response: Response,
+    screening_graph: ScreeningGraphPort,
+    app: FastAPI,
+) -> ScreeningAPIResponse:
+    screening_id = screening_input.screening_id
+    registry = getattr(app.state, "screening_id_registry", None)
+    reserved = False
+    if registry is not None:
+        if not registry.reserve(screening_id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="screening_id already exists",
+            )
+        reserved = True
+        if _snapshot_values(screening_graph, screening_id) is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="screening_id already exists",
+            )
+    elif _snapshot_values(screening_graph, screening_id) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="screening_id already exists",
+        )
+
+    try:
+        state = build_initial_screening_state(screening_input)
+        uploaded_hashes = {}
+        if jd_content is not None:
+            uploaded_hashes[(SourceType.JD_FILE, screening_input.jd.input_id)] = sha256(
+                jd_content
+            ).hexdigest()
+        if resume_content is not None:
+            uploaded_hashes[(SourceType.RESUME_FILE, screening_input.resume.input_id)] = sha256(
+                resume_content
+            ).hexdigest()
+        if uploaded_hashes:
+            state = state.model_copy(
+                update={
+                    "provenances": tuple(
+                        provenance.model_copy(
+                            update={
+                                "content_hash": uploaded_hashes[
+                                    (
+                                        provenance.source_type,
+                                        provenance.source_ref,
+                                    )
+                                ]
+                            }
+                        )
+                        if (provenance.source_type, provenance.source_ref) in uploaded_hashes
+                        else provenance
+                        for provenance in state.provenances
+                    )
+                }
+            )
+        output = invoke_screening_graph(
+            screening_graph,
+            state,
+            jd_content=jd_content,
+            resume_content=resume_content,
+            config=_thread_config(screening_id),
+        )
+        result = report_from_graph_values(output)
+    except (ApplicationDependencyError, InputInterruptionError) as exc:
+        if reserved and _snapshot_values(screening_graph, screening_id) is None:
+            registry.release_if_unstarted(screening_id)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    except Exception:
+        if reserved and _snapshot_values(screening_graph, screening_id) is None:
+            registry.release_if_unstarted(screening_id)
+        raise
+    response.status_code = _response_status(result)
+    return result
+
+
+def _resume_graph(
+    *,
+    screening_id: str,
+    payload: InputResume,
+    response: Response,
+    screening_graph: ScreeningGraphPort,
+) -> ScreeningAPIResponse:
+    if payload.screening_input.screening_id != screening_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="resume screening_id does not match requested screening",
+        )
+    try:
+        output = screening_graph.invoke(
+            Command(resume=payload.model_dump(mode="json")),
+            config=_thread_config(screening_id),
+        )
+        result = report_from_graph_values(output)
+    except InputInterruptionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    response.status_code = _response_status(result)
+    return result
+
+
 def create_app(
     *,
     graph: ScreeningGraphPort | None,
@@ -174,52 +336,64 @@ def create_app(
         response: Response,
         screening_graph: ScreeningGraphPort = Depends(provide_screening_graph),
     ) -> ScreeningAPIResponse:
-        screening_id = submission.screening_input.screening_id
-        registry = getattr(app.state, "screening_id_registry", None)
-        reserved = False
-        if registry is not None:
-            if not registry.reserve(screening_id):
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="screening_id already exists",
-                )
-            reserved = True
-            # Protect checkpoints created before the registry was introduced
-            # (or by another approved graph entrypoint).
-            if _snapshot_values(screening_graph, screening_id) is not None:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="screening_id already exists",
-                )
-        elif _snapshot_values(screening_graph, screening_id) is not None:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="screening_id already exists",
-            )
+        return _start_screening(
+            screening_input=submission.screening_input,
+            jd_content=submission.jd_content,
+            resume_content=submission.resume_content,
+            response=response,
+            screening_graph=screening_graph,
+            app=app,
+        )
 
+    @app.post(
+        "/screenings/upload",
+        response_model=ScreeningAPIResponse,
+    )
+    def create_screening_from_upload(
+        response: Response,
+        screening_id: str = Form(...),
+        jd_file: UploadFile = File(...),
+        resume_file: UploadFile = File(...),
+        linkedin_url: str | None = Form(None),
+        github_url: str | None = Form(None),
+        portfolio_url: str | None = Form(None),
+        linkedin_authorized: bool = Form(False),
+        github_authorized: bool = Form(False),
+        portfolio_authorized: bool = Form(False),
+        screening_graph: ScreeningGraphPort = Depends(provide_screening_graph),
+    ) -> ScreeningAPIResponse:
+        jd_document, jd_content = _document_from_upload(jd_file, kind=InputKind.JD)
+        resume_document, resume_content = _document_from_upload(
+            resume_file,
+            kind=InputKind.RESUME,
+        )
         try:
-            state = build_initial_screening_state(submission.screening_input)
-            output = invoke_screening_graph(
-                screening_graph,
-                state,
-                jd_content=submission.jd_content,
-                resume_content=submission.resume_content,
-                config=_thread_config(screening_id),
+            screening_input = ScreeningInput(
+                screening_id=screening_id,
+                jd=jd_document,
+                resume=resume_document,
+                external_sources=ExternalSourceInput(
+                    linkedin_url=linkedin_url or None,
+                    github_url=github_url or None,
+                    portfolio_url=portfolio_url or None,
+                    linkedin_authorized=linkedin_authorized,
+                    github_authorized=github_authorized,
+                    portfolio_authorized=portfolio_authorized,
+                ),
             )
-            result = report_from_graph_values(output)
-        except (ApplicationDependencyError, InputInterruptionError) as exc:
-            if reserved and _snapshot_values(screening_graph, screening_id) is None:
-                registry.release_if_unstarted(screening_id)
+        except ValidationError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=str(exc),
+                detail=exc.errors(include_url=False),
             ) from exc
-        except Exception:
-            if reserved and _snapshot_values(screening_graph, screening_id) is None:
-                registry.release_if_unstarted(screening_id)
-            raise
-        response.status_code = _response_status(result)
-        return result
+        return _start_screening(
+            screening_input=screening_input,
+            jd_content=jd_content,
+            resume_content=resume_content,
+            response=response,
+            screening_graph=screening_graph,
+            app=app,
+        )
 
     @app.post(
         "/screenings/{screening_id}/resume",
@@ -252,19 +426,123 @@ def create_app(
                 detail="screening is not waiting for input",
             )
 
-        try:
-            output = screening_graph.invoke(
-                Command(resume=payload.model_dump(mode="json")),
-                config=_thread_config(screening_id),
+        return _resume_graph(
+            screening_id=screening_id,
+            payload=payload,
+            response=response,
+            screening_graph=screening_graph,
+        )
+
+    @app.post(
+        "/screenings/{screening_id}/resume-upload",
+        response_model=ScreeningAPIResponse,
+    )
+    def resume_screening_from_upload(
+        screening_id: str,
+        response: Response,
+        jd_file: UploadFile | None = File(None),
+        resume_file: UploadFile | None = File(None),
+        screening_graph: ScreeningGraphPort = Depends(provide_screening_graph),
+    ) -> ScreeningAPIResponse:
+        values = _snapshot_values(screening_graph, screening_id)
+        if values is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="screening not found")
+        current = report_from_graph_values(values)
+        if (
+            current.interruption is None
+            or current.report.workflow_status is not WorkflowStatus.WAITING_FOR_INPUT
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="screening is not waiting for input",
             )
-            result = report_from_graph_values(output)
-        except InputInterruptionError as exc:
+        state, blocks, _ = from_orchestration_state(values)
+        missing = set(state.required_inputs_missing)
+        supplied_files = {
+            "jd.extracted_content": jd_file,
+            "resume.extracted_content": resume_file,
+        }
+        if not any(supplied_files[key] is not None for key in missing if key in supplied_files):
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=str(exc),
-            ) from exc
-        response.status_code = _response_status(result)
-        return result
+                detail="upload at least one document currently required by the screening",
+            )
+        missing_documents = {key for key in missing if key in supplied_files}
+        if any(supplied_files[key] is None for key in missing_documents):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "upload every document currently required by the screening "
+                    "in one resume request"
+                ),
+            )
+        if any(file is not None and key not in missing for key, file in supplied_files.items()):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="an uploaded document is not currently required by the screening",
+            )
+
+        updated_documents = {}
+        new_blocks = []
+        for key, upload, field_name, source_type, kind, extractor in (
+            (
+                "jd.extracted_content",
+                jd_file,
+                "jd",
+                SourceType.JD_FILE,
+                InputKind.JD,
+                extract_document_text,
+            ),
+            (
+                "resume.extracted_content",
+                resume_file,
+                "resume",
+                SourceType.RESUME_FILE,
+                InputKind.RESUME,
+                extract_resume_text,
+            ),
+        ):
+            old_document = getattr(state.screening_input, field_name)
+            if upload is None:
+                updated_documents[field_name] = old_document
+                continue
+            if key not in missing:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"{field_name} is not currently required by the screening",
+                )
+            document, content = _document_from_upload(
+                upload,
+                kind=kind,
+                input_id=old_document.input_id,
+            )
+            refs = _provenance_for_document(state, old_document, source_type)
+            try:
+                new_blocks.extend(
+                    extractor(
+                        document=document,
+                        content=content,
+                        provenance_refs=refs,
+                    )
+                )
+            except (ValueError, RuntimeError) as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"{field_name} could not be extracted",
+                ) from exc
+            updated_documents[field_name] = document
+
+        screening_input = state.screening_input.model_copy(update=updated_documents)
+        payload = InputResume(
+            screening_input=screening_input,
+            extracted_blocks=(*blocks, *new_blocks),
+        )
+        return _resume_graph(
+            screening_id=screening_id,
+            payload=payload,
+            response=response,
+            screening_graph=screening_graph,
+        )
 
     @app.get(
         "/screenings/{screening_id}",

@@ -6,7 +6,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 from pydantic import ValidationError
 
-from vikat_hire.contracts.common import WorkflowStatus
+from vikat_hire.contracts.common import SourceType, WorkflowStatus
 from vikat_hire.orchestration.interrupts import (
     InputInterruptionError,
     InputResume,
@@ -29,6 +29,27 @@ def _waiting(state):
 
 def _payload(state, blocks):
     return InputResume(screening_input=state.screening_input, extracted_blocks=blocks).model_dump()
+
+
+def _expected_resumed_state(state, blocks):
+    documents = {
+        (SourceType.JD_FILE, state.screening_input.jd.input_id): state.screening_input.jd,
+        (
+            SourceType.RESUME_FILE,
+            state.screening_input.resume.input_id,
+        ): state.screening_input.resume,
+    }
+    block_sources = {(block.source_type, block.source_ref) for block in blocks}
+    provenances = tuple(
+        provenance.model_copy(update={"content_hash": documents[key].content_hash})
+        if (key := (provenance.source_type, provenance.source_ref)) in documents
+        and key in block_sources
+        else provenance
+        for provenance in state.provenances
+    )
+    return state.model_copy(
+        update={"status": WorkflowStatus.EVALUATING, "provenances": provenances}
+    )
 
 
 def _graph(checkpointer):
@@ -60,7 +81,7 @@ def test_checkpoint_roundtrip_preserves_every_field(screening_state, extracted_b
     result = resume_missing_input(restored, _payload(screening_state, extracted_blocks))
     resumed, blocks, _ = from_orchestration_state(result)
     assert blocks == extracted_blocks
-    assert resumed == screening_state.model_copy(update={"status": WorkflowStatus.EVALUATING})
+    assert resumed == _expected_resumed_state(screening_state, extracted_blocks)
 
 
 def test_partial_resume_remains_waiting_and_preserves_original(screening_state, extracted_blocks):
@@ -182,7 +203,7 @@ def test_real_langgraph_interrupt_partial_resume_and_reconstruction(
     result = graph.invoke(Command(resume=_payload(screening_state, extracted_blocks)), config)
     assert "__interrupt__" not in result
     state, blocks, _ = from_orchestration_state(result)
-    assert state == screening_state.model_copy(update={"status": WorkflowStatus.EVALUATING})
+    assert state == _expected_resumed_state(screening_state, extracted_blocks)
     assert blocks == extracted_blocks
     assert graph.get_state(config).next == ()
     assert initial == to_orchestration_state(screening_state, extracted_blocks=())
@@ -262,4 +283,4 @@ def test_resume_can_correct_blank_metadata_without_losing_results(
             _payload(screening_state, extracted_blocks),
         )
     )
-    assert result == screening_state.model_copy(update={"status": WorkflowStatus.EVALUATING})
+    assert result == _expected_resumed_state(screening_state, extracted_blocks)

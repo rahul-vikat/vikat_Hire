@@ -10,6 +10,7 @@ Requires-Dist: uvicorn[standard]<1.0,>=0.32
 Requires-Dist: SQLAlchemy<3.0,>=2.0
 Requires-Dist: alembic<2.0,>=1.14
 Requires-Dist: psycopg[binary]<4.0,>=3.2
+Requires-Dist: psycopg-pool<4.0,>=3.2
 Requires-Dist: httpx<1.0,>=0.27
 Requires-Dist: langgraph<1.0,>=0.2
 Requires-Dist: langchain-core<1.0,>=0.3

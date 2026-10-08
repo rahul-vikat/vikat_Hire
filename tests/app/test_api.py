@@ -113,6 +113,106 @@ def test_post_screening_returns_authoritative_completed_report() -> None:
     assert "interruption" not in result or result["interruption"] is None
 
 
+def test_upload_endpoint_generates_document_metadata_and_completes_screening() -> None:
+    graph = _graph()
+    client = TestClient(create_app(graph=graph))
+
+    response = client.post(
+        "/screenings/upload",
+        data={"screening_id": "api-upload-complete"},
+        files={
+            "jd_file": (
+                "role.txt",
+                b"Must have: Python\nOwn services end-to-end.",
+                "text/plain",
+            ),
+            "resume_file": (
+                "candidate.txt",
+                b"Python developer\nOwned services end-to-end.",
+                "text/plain",
+            ),
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["report"]["screening_id"] == "api-upload-complete"
+    assert result["report"]["score"] is not None
+    snapshot = graph.get_state({"configurable": {"thread_id": "api-upload-complete"}})
+    state, _, _ = from_orchestration_state(snapshot.values)
+    assert state.screening_input.jd.content_hash
+    assert state.screening_input.resume.content_hash
+    assert state.screening_input.jd.storage_ref.startswith("upload:")
+    assert state.screening_input.resume.storage_ref.startswith("upload:")
+    file_provenances = {
+        (item.source_type, item.source_ref): item.content_hash for item in state.provenances
+    }
+    assert file_provenances[(SourceType.JD_FILE, state.screening_input.jd.input_id)] == (
+        state.screening_input.jd.content_hash
+    )
+    assert file_provenances[(SourceType.RESUME_FILE, state.screening_input.resume.input_id)] == (
+        state.screening_input.resume.content_hash
+    )
+
+
+def test_upload_resume_extracts_all_missing_documents_and_resumes() -> None:
+    graph = _graph()
+    client = TestClient(create_app(graph=graph))
+    screening_id = "api-upload-resume"
+
+    interrupted = client.post(
+        "/screenings",
+        json=_payload(screening_id),
+    )
+    assert interrupted.status_code == 202
+
+    incomplete_resume = client.post(
+        f"/screenings/{screening_id}/resume-upload",
+        files={"jd_file": ("role.txt", b"Must have: Python", "text/plain")},
+    )
+    assert incomplete_resume.status_code == 422
+
+    resumed = client.post(
+        f"/screenings/{screening_id}/resume-upload",
+        files={
+            "jd_file": (
+                "role.txt",
+                b"Must have: Python\nOwn services end-to-end.",
+                "text/plain",
+            ),
+            "resume_file": (
+                "candidate.txt",
+                b"Python developer\nOwned services end-to-end.",
+                "text/plain",
+            ),
+        },
+    )
+    assert resumed.status_code == 200, resumed.text
+    report = ScreeningReport.model_validate(resumed.json()["report"])
+    assert report.score is not None
+    assert report.policy is not None
+
+    snapshot = graph.get_state({"configurable": {"thread_id": screening_id}})
+    state, blocks, _ = from_orchestration_state(snapshot.values)
+    assert state.required_inputs_missing == ()
+    assert {block.source_type for block in blocks} >= {
+        SourceType.JD_FILE,
+        SourceType.RESUME_FILE,
+    }
+    assert all(block.provenance_refs for block in blocks)
+    provenance_by_id = {item.provenance_id: item for item in state.provenances}
+    for block in blocks:
+        assert all(
+            provenance_by_id[reference].content_hash
+            == (
+                state.screening_input.jd.content_hash
+                if block.source_type is SourceType.JD_FILE
+                else state.screening_input.resume.content_hash
+            )
+            for reference in block.provenance_refs
+        )
+
+
 def test_missing_document_bytes_interrupt_and_resume() -> None:
     graph = _graph()
     client = TestClient(create_app(graph=graph))

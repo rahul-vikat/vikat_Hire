@@ -12,12 +12,16 @@ src/vikat_hire/ai/groq_controller.py
 src/vikat_hire/ai/llm_semantic.py
 src/vikat_hire/app/__init__.py
 src/vikat_hire/app/api.py
+src/vikat_hire/app/composition.py
 src/vikat_hire/app/dependencies.py
+src/vikat_hire/app/main.py
+src/vikat_hire/app/settings.py
 src/vikat_hire/collection/__init__.py
 src/vikat_hire/collection/apify_linkedin.py
 src/vikat_hire/collection/collector.py
 src/vikat_hire/collection/external.py
 src/vikat_hire/collection/github.py
+src/vikat_hire/collection/http_providers.py
 src/vikat_hire/collection/jd_extractor.py
 src/vikat_hire/collection/linkedin.py
 src/vikat_hire/collection/portfolio.py
@@ -107,6 +111,7 @@ src/vikat_hire/orchestration/nodes/normalize.py
 src/vikat_hire/orchestration/nodes/validate_input.py
 src/vikat_hire/persistence/__init__.py
 src/vikat_hire/persistence/checkpoints.py
+src/vikat_hire/persistence/postgres.py
 src/vikat_hire/persistence/screening_store.py
 src/vikat_hire/policy/__init__.py
 src/vikat_hire/policy/confidence.py

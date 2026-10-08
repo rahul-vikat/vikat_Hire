@@ -5,7 +5,7 @@ from __future__ import annotations
 from langgraph.types import interrupt
 from pydantic import BaseModel, ConfigDict
 
-from vikat_hire.contracts.common import WorkflowStatus, utc_now
+from vikat_hire.contracts.common import SourceType, WorkflowStatus, utc_now
 from vikat_hire.contracts.inputs import ScreeningInput
 from vikat_hire.contracts.normalization import ExtractedTextBlock
 from vikat_hire.contracts.state import ScreeningState
@@ -70,7 +70,27 @@ def resume_missing_input(
     supplied = InputResume.model_validate(payload)
     if supplied.screening_input.screening_id != state.screening_id:
         raise InputInterruptionError("resume screening_id does not match interrupted screening")
-    updated = state.model_copy(update={"screening_input": supplied.screening_input})
+    documents = {
+        (SourceType.JD_FILE, supplied.screening_input.jd.input_id): supplied.screening_input.jd,
+        (
+            SourceType.RESUME_FILE,
+            supplied.screening_input.resume.input_id,
+        ): supplied.screening_input.resume,
+    }
+    block_sources = {(block.source_type, block.source_ref) for block in supplied.extracted_blocks}
+    provenances = tuple(
+        provenance.model_copy(update={"content_hash": documents[key].content_hash})
+        if (key := (provenance.source_type, provenance.source_ref)) in documents
+        and key in block_sources
+        else provenance
+        for provenance in state.provenances
+    )
+    updated = state.model_copy(
+        update={
+            "screening_input": supplied.screening_input,
+            "provenances": provenances,
+        }
+    )
     validated = validate_input_node(updated, extracted_blocks=supplied.extracted_blocks)
     return to_orchestration_state(validated, extracted_blocks=supplied.extracted_blocks)
 
