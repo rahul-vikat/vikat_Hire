@@ -21,6 +21,7 @@ dependencies = [
     "python-multipart>=0.0.12,<1.0",
     "pytesseract>=0.3.13,<1.0",
     "pypdfium2>=4.30,<5.0",
+    "langgraph-checkpoint-postgres==3.0.5",
 ]
 
 [build-system]

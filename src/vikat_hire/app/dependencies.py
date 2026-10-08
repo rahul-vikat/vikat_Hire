@@ -26,11 +26,9 @@ class ApplicationDependencyError(ValueError):
 class ScreeningGraphPort(Protocol):
     """The graph operations required by the HTTP boundary."""
 
-    def invoke(self, input: Mapping[str, Any], config: Mapping[str, Any]) -> Any:
-        ...
+    def invoke(self, input: Mapping[str, Any], config: Mapping[str, Any]) -> Any: ...
 
-    def get_state(self, config: Mapping[str, Any]) -> Any:
-        ...
+    def get_state(self, config: Mapping[str, Any]) -> Any: ...
 
 
 class ScreeningSubmission(ContractModel):
@@ -93,9 +91,7 @@ def build_initial_screening_state(
 ) -> ScreeningState:
     """Build initial domain state and provenance from typed input metadata."""
     if not isinstance(screening_input, ScreeningInput):
-        raise ApplicationDependencyError(
-            "screening_input must be a ScreeningInput"
-        )
+        raise ApplicationDependencyError("screening_input must be a ScreeningInput")
     if not screening_input.screening_id.strip():
         raise ApplicationDependencyError("screening_id must not be blank")
     if screening_input.jd.kind is not InputKind.JD:
@@ -125,14 +121,10 @@ def build_linkedin_fetcher(
     No domain contract or orchestration component depends on Apify.
     """
     if not isinstance(apify_api_token, str) or not apify_api_token.strip():
-        raise ApplicationDependencyError(
-            "Apify API token must be a non-empty string"
-        )
+        raise ApplicationDependencyError("Apify API token must be a non-empty string")
 
     if not isinstance(apify_actor_id, str) or not apify_actor_id.strip():
-        raise ApplicationDependencyError(
-            "Apify actor ID must be a non-empty string"
-        )
+        raise ApplicationDependencyError("Apify actor ID must be a non-empty string")
 
     return ApifyLinkedInFetcher(
         api_token=apify_api_token,
@@ -155,19 +147,13 @@ def build_external_collector_registry(
     remains unaware of their implementation details.
     """
     if not callable(getattr(linkedin_fetcher, "fetch", None)):
-        raise ApplicationDependencyError(
-            "LinkedIn fetcher must provide fetch()"
-        )
+        raise ApplicationDependencyError("LinkedIn fetcher must provide fetch()")
 
     if not callable(getattr(github_fetcher, "fetch", None)):
-        raise ApplicationDependencyError(
-            "GitHub fetcher must provide fetch()"
-        )
+        raise ApplicationDependencyError("GitHub fetcher must provide fetch()")
 
     if not callable(getattr(portfolio_fetcher, "fetch", None)):
-        raise ApplicationDependencyError(
-            "Portfolio fetcher must provide fetch()"
-        )
+        raise ApplicationDependencyError("Portfolio fetcher must provide fetch()")
 
     return ExternalCollectorRegistry(
         {

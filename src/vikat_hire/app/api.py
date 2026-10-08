@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from contextlib import AbstractAsyncContextManager
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Response, status
+from fastapi.responses import JSONResponse
 from langgraph.types import Command
 
 from vikat_hire.app.dependencies import (
@@ -21,6 +23,75 @@ from vikat_hire.orchestration.graph import invoke_screening_graph
 from vikat_hire.orchestration.interrupts import InputInterruptionError, InputResume
 
 logger = logging.getLogger(__name__)
+
+
+class RequestSizeLimitMiddleware:
+    """Reject oversized request bodies without truncating or parsing them."""
+
+    def __init__(self, app, *, max_bytes: int | Callable[[], int]) -> None:
+        if not callable(max_bytes) and max_bytes <= 0:
+            raise ValueError("max_bytes must be greater than zero")
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        max_bytes = self.max_bytes() if callable(self.max_bytes) else self.max_bytes
+        if max_bytes <= 0:
+            raise RuntimeError("configured request size limit must be greater than zero")
+
+        content_length = next(
+            (
+                value.decode("latin-1")
+                for key, value in scope.get("headers", ())
+                if key.lower() == b"content-length"
+            ),
+            None,
+        )
+        if content_length is not None:
+            try:
+                if int(content_length) > max_bytes:
+                    await _send_body_too_large(scope, receive, send)
+                    return
+            except ValueError:
+                await JSONResponse(
+                    {"detail": "invalid Content-Length"},
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )(scope, receive, send)
+                return
+
+        body = bytearray()
+        more_body = True
+        while more_body:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            body.extend(message.get("body", b""))
+            if len(body) > max_bytes:
+                await _send_body_too_large(scope, receive, send)
+                return
+            more_body = message.get("more_body", False)
+
+        sent = False
+
+        async def replay_body():
+            nonlocal sent
+            if sent:
+                return {"type": "http.request", "body": b"", "more_body": False}
+            sent = True
+            return {"type": "http.request", "body": bytes(body), "more_body": False}
+
+        await self.app(scope, replay_body, send)
+
+
+async def _send_body_too_large(scope, receive, send) -> None:
+    await JSONResponse(
+        {"detail": "request body exceeds configured size limit"},
+        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+    )(scope, receive, send)
 
 
 def _thread_config(screening_id: str) -> dict[str, Any]:
@@ -41,21 +112,57 @@ def _response_status(result: ScreeningAPIResponse) -> int:
     return status.HTTP_200_OK
 
 
-def create_app(*, graph: ScreeningGraphPort) -> FastAPI:
+def create_app(
+    *,
+    graph: ScreeningGraphPort | None,
+    lifespan: Callable[[FastAPI], AbstractAsyncContextManager[None]] | None = None,
+    title: str = "VikatHire API",
+    max_request_bytes: int | Callable[[], int] = 20 * 1024 * 1024,
+) -> FastAPI:
     """Create the HTTP boundary around an explicitly injected screening graph."""
-    if not callable(getattr(graph, "invoke", None)) or not callable(
-        getattr(graph, "get_state", None)
+    if graph is None and lifespan is None:
+        raise ApplicationDependencyError("graph or a composition lifespan is required")
+    if graph is not None and (
+        not callable(getattr(graph, "invoke", None))
+        or not callable(getattr(graph, "get_state", None))
     ):
-        raise ApplicationDependencyError(
-            "graph must provide invoke() and get_state()"
-        )
-    if getattr(graph, "checkpointer", None) is None:
+        raise ApplicationDependencyError("graph must provide invoke() and get_state()")
+    if graph is not None and getattr(graph, "checkpointer", None) is None:
         raise ApplicationDependencyError(
             "graph must be compiled with an injected LangGraph checkpointer"
         )
 
-    app = FastAPI(title="VikatHire API")
-    app.state.screening_graph = graph
+    app = FastAPI(title=title, lifespan=lifespan)
+    app.add_middleware(RequestSizeLimitMiddleware, max_bytes=max_request_bytes)
+    if graph is not None:
+        app.state.screening_graph = graph
+
+    @app.get("/health")
+    def health() -> dict[str, str]:
+        return {"status": "ok"}
+
+    @app.get("/readiness")
+    def readiness() -> dict[str, str]:
+        screening_graph = getattr(app.state, "screening_graph", None)
+        if screening_graph is None or getattr(screening_graph, "checkpointer", None) is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="screening service is not ready",
+            )
+        registry = getattr(app.state, "screening_id_registry", None)
+        if registry is not None:
+            try:
+                registry.ping()
+            except Exception as exc:
+                logger.warning(
+                    "Readiness database check failed (%s)",
+                    type(exc).__name__,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="screening service is not ready",
+                ) from exc
+        return {"status": "ready"}
 
     @app.post(
         "/screenings",
@@ -68,7 +175,23 @@ def create_app(*, graph: ScreeningGraphPort) -> FastAPI:
         screening_graph: ScreeningGraphPort = Depends(provide_screening_graph),
     ) -> ScreeningAPIResponse:
         screening_id = submission.screening_input.screening_id
-        if _snapshot_values(screening_graph, screening_id) is not None:
+        registry = getattr(app.state, "screening_id_registry", None)
+        reserved = False
+        if registry is not None:
+            if not registry.reserve(screening_id):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="screening_id already exists",
+                )
+            reserved = True
+            # Protect checkpoints created before the registry was introduced
+            # (or by another approved graph entrypoint).
+            if _snapshot_values(screening_graph, screening_id) is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="screening_id already exists",
+                )
+        elif _snapshot_values(screening_graph, screening_id) is not None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="screening_id already exists",
@@ -85,10 +208,16 @@ def create_app(*, graph: ScreeningGraphPort) -> FastAPI:
             )
             result = report_from_graph_values(output)
         except (ApplicationDependencyError, InputInterruptionError) as exc:
+            if reserved and _snapshot_values(screening_graph, screening_id) is None:
+                registry.release_if_unstarted(screening_id)
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=str(exc),
             ) from exc
+        except Exception:
+            if reserved and _snapshot_values(screening_graph, screening_id) is None:
+                registry.release_if_unstarted(screening_id)
+            raise
         response.status_code = _response_status(result)
         return result
 
@@ -155,9 +284,10 @@ def create_app(*, graph: ScreeningGraphPort) -> FastAPI:
 
     @app.exception_handler(Exception)
     async def unexpected_error_handler(request, exc: Exception):
-        logger.exception("Unhandled screening API failure", exc_info=exc)
-        from fastapi.responses import JSONResponse
-
+        logger.error(
+            "Unhandled screening API failure (%s)",
+            type(exc).__name__,
+        )
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"detail": "internal screening service error"},

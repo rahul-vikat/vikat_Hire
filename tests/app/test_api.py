@@ -152,8 +152,7 @@ def test_missing_document_bytes_interrupt_and_resume() -> None:
     resume_payload = {
         "screening_input": state.screening_input.model_dump(mode="json"),
         "extracted_blocks": [
-            block.model_dump(mode="json")
-            for block in (*jd_blocks, *resume_blocks)
+            block.model_dump(mode="json") for block in (*jd_blocks, *resume_blocks)
         ],
     }
 
@@ -195,13 +194,9 @@ def test_api_preserves_review_required_policy_result() -> None:
     payload.update(
         {
             "jd_content": _content(
-                "Must have: Python\n"
-                "Own services end-to-end.\n"
-                "No ownership of services end-to-end."
+                "Must have: Python\nOwn services end-to-end.\nNo ownership of services end-to-end."
             ),
-            "resume_content": _content(
-                "Python developer\nOwned services end-to-end."
-            ),
+            "resume_content": _content("Python developer\nOwned services end-to-end."),
         }
     )
 
@@ -225,9 +220,7 @@ def test_resume_rejects_screening_identity_mismatch() -> None:
     )
 
     assert response.status_code == 409
-    assert response.json()["detail"] == (
-        "resume screening_id does not match requested screening"
-    )
+    assert response.json()["detail"] == ("resume screening_id does not match requested screening")
 
 
 def test_invalid_screening_request_uses_typed_validation_response() -> None:
@@ -263,6 +256,22 @@ def test_get_returns_not_found_for_unknown_screening() -> None:
     assert response.status_code == 404
 
 
+def test_health_and_readiness_are_available_without_provider_calls() -> None:
+    client = TestClient(create_app(graph=_graph()))
+
+    assert client.get("/health").json() == {"status": "ok"}
+    assert client.get("/readiness").json() == {"status": "ready"}
+
+
+def test_request_body_limit_returns_413_without_truncating() -> None:
+    client = TestClient(create_app(graph=_graph(), max_request_bytes=32))
+
+    response = client.post("/screenings", content=b"x" * 33)
+
+    assert response.status_code == 413
+    assert response.json() == {"detail": "request body exceeds configured size limit"}
+
+
 def test_app_requires_checkpointed_graph() -> None:
     class UncheckpointedGraph:
         def invoke(self, input, config):
@@ -288,6 +297,37 @@ def test_duplicate_screening_id_returns_conflict() -> None:
     assert first.status_code == 202
     assert second.status_code == 409
     assert second.json()["detail"] == "screening_id already exists"
+
+
+def test_registry_does_not_overwrite_checkpoint_created_before_registry() -> None:
+    class ExistingGraph:
+        checkpointer = object()
+
+        def invoke(self, input, config):
+            raise AssertionError("existing checkpoint must not be overwritten")
+
+        def get_state(self, config):
+            return type("Snapshot", (), {"values": {"screening_state": {}}})()
+
+    class Registry:
+        reserved_ids: list[str] = []
+
+        def reserve(self, screening_id: str) -> bool:
+            self.reserved_ids.append(screening_id)
+            return True
+
+        def release_if_unstarted(self, screening_id: str) -> None:
+            raise AssertionError("existing checkpoint reservation must be retained")
+
+    app = create_app(graph=ExistingGraph())
+    registry = Registry()
+    app.state.screening_id_registry = registry
+    client = TestClient(app)
+
+    response = client.post("/screenings", json=_payload("legacy-checkpoint"))
+
+    assert response.status_code == 409
+    assert registry.reserved_ids == ["legacy-checkpoint"]
 
 
 def test_unexpected_graph_error_has_safe_http_response() -> None:
