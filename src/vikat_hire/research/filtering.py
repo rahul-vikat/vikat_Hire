@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
 
@@ -79,6 +80,8 @@ def filter_research_evidence(
         validation.decision_id,
         relevance_status.value,
         *matched_terms,
+        json.dumps(entity.model_dump(mode="json"), sort_keys=True, ensure_ascii=False),
+        json.dumps(result.model_dump(mode="json"), sort_keys=True, ensure_ascii=False),
     )
     relevance = DimensionRelevanceDecision(
         decision_id=f"dimension-relevance-{relevance_id}",
@@ -114,6 +117,8 @@ def filter_research_evidence(
         relevance.decision_id,
         filter_status.value,
         filter_reason.value,
+        json.dumps(entity.model_dump(mode="json"), sort_keys=True, ensure_ascii=False),
+        json.dumps(result.model_dump(mode="json"), sort_keys=True, ensure_ascii=False),
     )
     return AuditedResearchObservation(
         observation_id=f"research-observation-{observation_id}",

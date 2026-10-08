@@ -205,8 +205,16 @@ class AuditedResearchObservation(ContractModel):
             raise ValueError("relevance decision result_id does not match")
         if self.relevance.validation_decision_id != self.validation.decision_id:
             raise ValueError("relevance decision does not reference validation")
-        if not set(self.result.provenance_refs).issubset(self.provenance_refs):
-            raise ValueError("observation must preserve raw result provenance")
+        if self.result.entity_type is not self.entity.entity_type:
+            raise ValueError("observation result entity_type does not match entity")
+        required_provenance = {
+            *self.entity.provenance_refs,
+            *self.result.provenance_refs,
+            *self.validation.provenance_refs,
+            *self.relevance.provenance_refs,
+        }
+        if not required_provenance.issubset(self.provenance_refs):
+            raise ValueError("observation must preserve the complete decision provenance chain")
         if self.status is ResearchFilterStatus.ACCEPTED:
             if (
                 self.validation.status is not EntityValidationStatus.VALIDATED
@@ -217,11 +225,15 @@ class AuditedResearchObservation(ContractModel):
         elif self.status is ResearchFilterStatus.AMBIGUOUS:
             if (
                 self.validation.status is not EntityValidationStatus.AMBIGUOUS
+                or self.relevance.status is not DimensionRelevanceStatus.NOT_EVALUATED
                 or self.reason is not ResearchFilterReason.ENTITY_AMBIGUOUS
             ):
                 raise ValueError("ambiguous observation requires ambiguous identity")
         elif self.validation.status is EntityValidationStatus.REJECTED:
-            if self.reason is not ResearchFilterReason.ENTITY_REJECTED:
+            if (
+                self.relevance.status is not DimensionRelevanceStatus.NOT_EVALUATED
+                or self.reason is not ResearchFilterReason.ENTITY_REJECTED
+            ):
                 raise ValueError("rejected identity must retain rejection reason")
         elif (
             self.validation.status is not EntityValidationStatus.VALIDATED
@@ -274,6 +286,15 @@ class ResearchEvidenceAssembly(ContractModel):
                 raise ValueError("assembly observation has a mismatched entity type")
             if observation.result.dimension not in expected:
                 raise ValueError("assembly observation has a mismatched dimension")
+        expected_accepted = {
+            dimension: {
+                item.result.result_id
+                for item in self.audited_observations
+                if item.result.dimension is dimension
+                and item.status is ResearchFilterStatus.ACCEPTED
+            }
+            for dimension in expected
+        }
         required_provenance = set(self.entity.provenance_refs)
         for observation in self.audited_observations:
             required_provenance.update(observation.provenance_refs)
@@ -292,6 +313,16 @@ class ResearchEvidenceAssembly(ContractModel):
                     raise ValueError("accepted evidence dimension does not match")
                 if observation.status is not ResearchFilterStatus.ACCEPTED:
                     raise ValueError("only accepted observations can be assembled")
+                if evidence.observation_id != observation.observation_id:
+                    raise ValueError("assembled evidence observation_id does not match audit")
+                if evidence.validation_decision_id != observation.validation.decision_id:
+                    raise ValueError("assembled evidence validation reference does not match audit")
+                if evidence.relevance_decision_id != observation.relevance.decision_id:
+                    raise ValueError("assembled evidence relevance reference does not match audit")
+                if not set(observation.provenance_refs).issubset(evidence.provenance_refs):
+                    raise ValueError("assembled evidence must preserve observation provenance")
+            if seen != expected_accepted[group.dimension]:
+                raise ValueError("assembly must include every accepted observation exactly once")
         return self
 
 

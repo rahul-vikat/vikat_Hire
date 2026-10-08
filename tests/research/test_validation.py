@@ -100,6 +100,28 @@ def test_target_name_conflicts_with_another_linkedin_entity_url(
     assert IdentitySignal.CONFLICTING_LINKEDIN_URL in decision.conflicting_signals
 
 
+def test_known_other_type_linkedin_url_conflicts_with_target_name(
+    company_entity,
+    college_entity,
+    research_result_factory,
+) -> None:
+    result = research_result_factory(
+        title="VIKAT.AI organization profile",
+        url=college_entity.linkedin_url,
+        content="",
+    )
+
+    decision = validate_research_entity(
+        entity=company_entity,
+        result=result,
+        known_entities=(college_entity,),
+    )
+
+    assert decision.status is EntityValidationStatus.AMBIGUOUS
+    assert decision.conflicting_entity_ids == (college_entity.entity_id,)
+    assert IdentitySignal.CONFLICTING_LINKEDIN_URL in decision.conflicting_signals
+
+
 def test_conflicting_known_entity_is_ambiguous(
     company_entity,
     research_result_factory,
@@ -127,6 +149,47 @@ def test_conflicting_known_entity_is_ambiguous(
     assert decision.reason is EntityValidationReason.CONFLICTING_IDENTITY_SIGNALS
     assert IdentitySignal.TARGET_NAME in decision.matched_signals
     assert IdentitySignal.OTHER_KNOWN_ENTITY in decision.conflicting_signals
+
+
+def test_known_entity_of_another_type_makes_multi_entity_result_ambiguous(
+    company_entity,
+    college_entity,
+    research_result_factory,
+) -> None:
+    result = research_result_factory(
+        title="VIKAT.AI and IIT Patna announce a research partnership",
+        content="Both organizations are discussed.",
+    )
+
+    decision = validate_research_entity(
+        entity=company_entity,
+        result=result,
+        known_entities=(college_entity,),
+    )
+
+    assert decision.status is EntityValidationStatus.AMBIGUOUS
+    assert decision.conflicting_entity_ids == (college_entity.entity_id,)
+    assert IdentitySignal.OTHER_KNOWN_ENTITY in decision.conflicting_signals
+
+
+def test_known_entity_of_another_type_alone_is_rejected(
+    company_entity,
+    college_entity,
+    research_result_factory,
+) -> None:
+    result = research_result_factory(
+        title="IIT Patna ranking update",
+        content="New ranking information.",
+    )
+
+    decision = validate_research_entity(
+        entity=company_entity,
+        result=result,
+        known_entities=(college_entity,),
+    )
+
+    assert decision.status is EntityValidationStatus.REJECTED
+    assert decision.conflicting_entity_ids == (college_entity.entity_id,)
 
 
 def test_clearly_different_known_entity_is_rejected(
@@ -211,6 +274,24 @@ def test_identity_validation_is_deterministic(
     second = validate_research_entity(entity=company_entity, result=result)
 
     assert first == second
+
+
+def test_validation_decision_id_is_bound_to_result_content(
+    company_entity,
+    research_result_factory,
+) -> None:
+    first_result = research_result_factory(title="VIKAT.AI funding")
+    changed_result = research_result_factory(
+        title="VIKAT.AI funding",
+        content="Different reporting content about investors.",
+    )
+
+    first = validate_research_entity(entity=company_entity, result=first_result)
+    repeated = validate_research_entity(entity=company_entity, result=first_result)
+    changed = validate_research_entity(entity=company_entity, result=changed_result)
+
+    assert first.decision_id == repeated.decision_id
+    assert first.decision_id != changed.decision_id
 
 
 def test_raw_result_contract_rejects_entity_dimension_mismatch(

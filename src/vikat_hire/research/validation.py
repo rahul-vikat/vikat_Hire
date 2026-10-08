@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
 from urllib.parse import urlsplit, urlunsplit
@@ -56,15 +57,10 @@ def validate_research_entity(
     )
 
     other_name_matches = tuple(
-        known
-        for known in known_entities
-        if known.entity_type is entity.entity_type and _contains_phrase(normalized_text, known.name)
+        known for known in known_entities if _contains_phrase(normalized_text, known.name)
     )
     other_url_matches = tuple(
-        known
-        for known in known_entities
-        if known.entity_type is entity.entity_type
-        and _url_matches_result(known.linkedin_url, result)
+        known for known in known_entities if _url_matches_result(known.linkedin_url, result)
     )
     other_matches = {item.entity_id: item for item in (*other_name_matches, *other_url_matches)}
     target_matches = target_name_match or alias_match or target_url_match
@@ -120,6 +116,16 @@ def validate_research_entity(
         *[signal.value for signal in matched_signals],
         *[signal.value for signal in conflicting_signals],
         *conflicting_entity_ids,
+        json.dumps(entity.model_dump(mode="json"), sort_keys=True, ensure_ascii=False),
+        json.dumps(result.model_dump(mode="json"), sort_keys=True, ensure_ascii=False),
+        json.dumps(
+            [
+                item.model_dump(mode="json")
+                for item in sorted(known_entities, key=lambda item: item.entity_id)
+            ],
+            sort_keys=True,
+            ensure_ascii=False,
+        ),
     )
     return EntityValidationDecision(
         decision_id=f"entity-validation-{decision_id}",

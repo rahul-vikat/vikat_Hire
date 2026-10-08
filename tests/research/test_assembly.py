@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from vikat_hire.contracts.research import (
     COLLEGE_DIMENSIONS,
     COMPANY_DIMENSIONS,
     ResearchDimension,
     ResearchEntityType,
+    ResearchEvidenceAssembly,
     ResearchFilterStatus,
 )
 from vikat_hire.research.assembly import (
@@ -176,3 +178,68 @@ def test_assembly_order_is_deterministic(
         ResearchEntityType.COLLEGE,
         ResearchEntityType.COMPANY,
     ]
+
+
+def test_assembly_contract_rejects_omitted_accepted_observation(
+    company_entity,
+    research_result_factory,
+) -> None:
+    observation = _assessment(company_entity, research_result_factory())
+    (assembly,) = assemble_research_evidence(
+        entities=(company_entity,),
+        observations=(observation,),
+    )
+    dimensions = list(assembly.dimensions)
+    dimensions[0] = dimensions[0].model_copy(update={"accepted_evidence": ()})
+
+    with pytest.raises(ValidationError, match="every accepted observation"):
+        ResearchEvidenceAssembly(
+            **{
+                **assembly.model_dump(),
+                "dimensions": tuple(dimensions),
+            }
+        )
+
+
+def test_assembly_contract_rejects_forged_observation_reference(
+    company_entity,
+    research_result_factory,
+) -> None:
+    observation = _assessment(company_entity, research_result_factory())
+    (assembly,) = assemble_research_evidence(
+        entities=(company_entity,),
+        observations=(observation,),
+    )
+    dimensions = list(assembly.dimensions)
+    group = dimensions[0]
+    forged = group.accepted_evidence[0].model_copy(
+        update={"validation_decision_id": "forged-validation"}
+    )
+    dimensions[0] = group.model_copy(update={"accepted_evidence": (forged,)})
+
+    with pytest.raises(ValidationError, match="validation reference"):
+        ResearchEvidenceAssembly(
+            **{
+                **assembly.model_dump(),
+                "dimensions": tuple(dimensions),
+            }
+        )
+
+
+def test_audited_observation_requires_complete_provenance_chain(
+    company_entity,
+    research_result_factory,
+) -> None:
+    observation = _assessment(company_entity, research_result_factory())
+    validation_provenance = observation.validation.provenance_refs[0]
+    incomplete_refs = tuple(
+        ref for ref in observation.provenance_refs if ref != validation_provenance
+    )
+
+    with pytest.raises(ValidationError, match="complete decision provenance"):
+        type(observation)(
+            **{
+                **observation.model_dump(),
+                "provenance_refs": incomplete_refs,
+            }
+        )

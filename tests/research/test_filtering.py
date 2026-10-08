@@ -264,6 +264,23 @@ def test_filtering_is_deterministic(
     assert _assessment(company_entity, result) == _assessment(company_entity, result)
 
 
+def test_relevance_decision_id_is_bound_to_result_content(
+    company_entity,
+    research_result_factory,
+) -> None:
+    first_result = research_result_factory(title="VIKAT.AI funding")
+    changed_result = research_result_factory(
+        title="VIKAT.AI funding",
+        content="Changed evidence description.",
+    )
+    first = _assessment(company_entity, first_result)
+    repeated = _assessment(company_entity, first_result)
+    changed = _assessment(company_entity, changed_result)
+
+    assert first.relevance.decision_id == repeated.relevance.decision_id
+    assert first.relevance.decision_id != changed.relevance.decision_id
+
+
 def test_mismatched_validation_reference_fails_loudly(
     company_entity,
     research_result_factory,
