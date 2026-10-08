@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import http.client
 import ipaddress
 import socket
 from collections.abc import Callable
 from html.parser import HTMLParser
+from ssl import create_default_context
 from urllib.parse import urljoin, urlsplit
 
 import httpx
@@ -180,7 +182,7 @@ class _VisibleTextParser(HTMLParser):
 
 
 class HTTPPortfolioTextFetcher:
-    """Fetch a public portfolio page and return its visible text only."""
+    """Fetch a public portfolio page, pinning each request to validated DNS."""
 
     def __init__(
         self,
@@ -188,83 +190,72 @@ class HTTPPortfolioTextFetcher:
         timeout_seconds: float = 30.0,
         max_bytes: int = 5 * 1024 * 1024,
         max_redirects: int = 3,
-        transport: httpx.BaseTransport | None = None,
         resolver: Callable[[str, int], list[tuple]] | None = None,
+        requester: Callable[[str, str, float, int], tuple[int, dict[str, str], bytes]]
+        | None = None,
     ) -> None:
         if timeout_seconds <= 0 or max_bytes <= 0 or max_redirects < 0:
             raise ValueError("portfolio timeout/size/redirect limits are invalid")
         self._timeout_seconds = timeout_seconds
         self._max_bytes = max_bytes
         self._max_redirects = max_redirects
-        self._transport = transport
         self._resolver = resolver or socket.getaddrinfo
+        self._requester = requester or _request_public_page
 
     def fetch(self, *, url: str) -> str:
-        current_url = _validate_public_http_url(url, resolver=self._resolver)
-        try:
-            with httpx.Client(
-                timeout=self._timeout_seconds,
-                transport=self._transport,
-                follow_redirects=False,
-                headers={"Accept": "text/html,application/xhtml+xml,text/plain"},
-            ) as client:
-                for redirect_count in range(self._max_redirects + 1):
-                    with client.stream("GET", current_url) as response:
-                        if response.is_redirect:
-                            if redirect_count >= self._max_redirects:
-                                raise ProviderUnavailableError("portfolio exceeded redirect limit")
-                            location = response.headers.get("location")
-                            if not location:
-                                raise ProviderMalformedResponseError(
-                                    "portfolio redirect omitted Location"
-                                )
-                            current_url = _validate_public_http_url(
-                                urljoin(current_url, location),
-                                resolver=self._resolver,
-                            )
-                            continue
-                        if response.status_code == 401 or response.status_code == 403:
-                            raise ProviderAuthenticationError("portfolio denied access")
-                        if response.status_code >= 500:
-                            raise ProviderUnavailableError("portfolio service is unavailable")
-                        response.raise_for_status()
-                        content_type = (
-                            response.headers.get("content-type", "")
-                            .split(";", 1)[0]
-                            .strip()
-                            .casefold()
-                        )
-                        if content_type not in {"text/html", "application/xhtml+xml", "text/plain"}:
-                            raise ProviderMalformedResponseError(
-                                "portfolio response must be HTML or plain text"
-                            )
-                        body = bytearray()
-                        for chunk in response.iter_bytes():
-                            body.extend(chunk)
-                            if len(body) > self._max_bytes:
-                                raise ProviderMalformedResponseError(
-                                    "portfolio response exceeds configured byte limit"
-                                )
-                        encoding = response.encoding or "utf-8"
-                        raw_text = bytes(body).decode(encoding, errors="replace")
-                        if content_type == "text/plain":
-                            visible_text = raw_text
-                        else:
-                            parser = _VisibleTextParser()
-                            parser.feed(raw_text)
-                            visible_text = "".join(parser.parts)
-                        normalized = "\n".join(
-                            line.strip() for line in visible_text.splitlines() if line.strip()
-                        )
-                        if not normalized:
-                            raise ProviderMalformedResponseError(
-                                "portfolio page contains no visible text"
-                            )
-                        return normalized
-        except httpx.TimeoutException as exc:
-            raise ProviderUnavailableError("portfolio request timed out") from exc
-        except httpx.HTTPError as exc:
-            raise ProviderUnavailableError("portfolio request failed") from exc
+        current_url, pinned_address = _validate_public_http_url(
+            url,
+            resolver=self._resolver,
+        )
+        for redirect_count in range(self._max_redirects + 1):
+            status_code, headers, body = self._requester(
+                current_url,
+                pinned_address,
+                self._timeout_seconds,
+                self._max_bytes,
+            )
+            if status_code in {301, 302, 303, 307, 308}:
+                if redirect_count >= self._max_redirects:
+                    raise ProviderUnavailableError("portfolio exceeded redirect limit")
+                location = _header_value(headers, "location")
+                if not location:
+                    raise ProviderMalformedResponseError("portfolio redirect omitted Location")
+                current_url, pinned_address = _validate_public_http_url(
+                    urljoin(current_url, location),
+                    resolver=self._resolver,
+                )
+                continue
+            if status_code in {401, 403}:
+                raise ProviderAuthenticationError("portfolio denied access")
+            if status_code >= 500:
+                raise ProviderUnavailableError("portfolio service is unavailable")
+            if status_code >= 400:
+                raise ProviderUnavailableError(f"portfolio returned HTTP {status_code}")
+
+            content_type_header = _header_value(headers, "content-type") or ""
+            content_type = content_type_header.split(";", 1)[0].strip().casefold()
+            if content_type not in {"text/html", "application/xhtml+xml", "text/plain"}:
+                raise ProviderMalformedResponseError(
+                    "portfolio response must be HTML or plain text"
+                )
+            if len(body) > self._max_bytes:
+                raise ProviderMalformedResponseError(
+                    "portfolio response exceeds configured byte limit"
+                )
+            encoding = _content_encoding(content_type_header)
+            raw_text = body.decode(encoding, errors="replace")
+            if content_type == "text/plain":
+                visible_text = raw_text
+            else:
+                parser = _VisibleTextParser()
+                parser.feed(raw_text)
+                visible_text = "".join(parser.parts)
+            normalized = "\n".join(
+                line.strip() for line in visible_text.splitlines() if line.strip()
+            )
+            if not normalized:
+                raise ProviderMalformedResponseError("portfolio page contains no visible text")
+            return normalized
         raise ProviderUnavailableError("portfolio request did not produce a response")
 
 
@@ -272,10 +263,12 @@ def _validate_public_http_url(
     url: str,
     *,
     resolver: Callable[[str, int], list[tuple]],
-) -> str:
+) -> tuple[str, str]:
     parsed = urlsplit(url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise ProviderMalformedResponseError("portfolio URL must be HTTP(S)")
+    if parsed.username is not None or parsed.password is not None:
+        raise ProviderMalformedResponseError("portfolio URL must not contain credentials")
     host = parsed.hostname.rstrip(".").casefold()
     if host in {"localhost", "localhost.localdomain"} or host.endswith(".localhost"):
         raise ProviderMalformedResponseError("portfolio URL host must be publicly routable")
@@ -286,16 +279,127 @@ def _validate_public_http_url(
     if address is not None:
         if not address.is_global:
             raise ProviderMalformedResponseError("portfolio URL host must be publicly routable")
+        pinned_address = str(address)
     else:
         try:
-            resolved = resolver(
-                host,
-                parsed.port or (443 if parsed.scheme == "https" else 80),
-            )
+            port = parsed.port or (443 if parsed.scheme == "https" else 80)
+            resolved = resolver(host, port)
         except OSError as exc:
             raise ProviderUnavailableError("portfolio host could not be resolved") from exc
-        if not resolved or any(not ipaddress.ip_address(item[4][0]).is_global for item in resolved):
+        try:
+            addresses = {ipaddress.ip_address(item[4][0]) for item in resolved}
+        except (IndexError, TypeError, ValueError) as exc:
+            raise ProviderUnavailableError("portfolio host returned invalid DNS data") from exc
+        if not addresses or any(not item.is_global for item in addresses):
             raise ProviderMalformedResponseError(
                 "portfolio URL host resolves to a non-public address"
             )
-    return url
+        pinned_address = str(sorted(addresses, key=lambda item: (item.version, int(item)))[0])
+    return url, pinned_address
+
+
+def _request_public_page(
+    url: str,
+    pinned_address: str,
+    timeout_seconds: float,
+    max_bytes: int,
+) -> tuple[int, dict[str, str], bytes]:
+    """Connect to the validated IP while retaining the URL host for Host/SNI."""
+    parsed = urlsplit(url)
+    host = parsed.hostname
+    if host is None:
+        raise ProviderMalformedResponseError("portfolio URL must include a host")
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    connection_class = _PinnedHTTPSConnection if parsed.scheme == "https" else _PinnedHTTPConnection
+    connection = connection_class(
+        host=host,
+        port=port,
+        pinned_address=pinned_address,
+        timeout=timeout_seconds,
+    )
+    target = parsed.path or "/"
+    if parsed.query:
+        target += f"?{parsed.query}"
+    host_header = parsed.netloc
+    try:
+        connection.request(
+            "GET",
+            target,
+            headers={
+                "Host": host_header,
+                "Accept": "text/html,application/xhtml+xml,text/plain",
+                "Accept-Encoding": "identity",
+                "Connection": "close",
+            },
+        )
+        response = connection.getresponse()
+        headers = {key.casefold(): value for key, value in response.getheaders()}
+        content_length = headers.get("content-length")
+        if content_length is not None:
+            try:
+                if int(content_length) > max_bytes:
+                    raise ProviderMalformedResponseError(
+                        "portfolio response exceeds configured byte limit"
+                    )
+            except ValueError as exc:
+                raise ProviderMalformedResponseError(
+                    "portfolio response has invalid Content-Length"
+                ) from exc
+        body = bytearray()
+        while True:
+            chunk = response.read(min(64 * 1024, max_bytes + 1 - len(body)))
+            if not chunk:
+                break
+            body.extend(chunk)
+            if len(body) > max_bytes:
+                raise ProviderMalformedResponseError(
+                    "portfolio response exceeds configured byte limit"
+                )
+        return response.status, headers, bytes(body)
+    except (OSError, http.client.HTTPException) as exc:
+        if isinstance(exc, TimeoutError):
+            raise ProviderUnavailableError("portfolio request timed out") from exc
+        raise ProviderUnavailableError("portfolio request failed") from exc
+    finally:
+        connection.close()
+
+
+class _PinnedHTTPConnection(http.client.HTTPConnection):
+    def __init__(self, *, host: str, port: int, pinned_address: str, timeout: float) -> None:
+        super().__init__(host, port, timeout=timeout)
+        self._pinned_address = pinned_address
+
+    def connect(self) -> None:
+        self.sock = socket.create_connection(
+            (self._pinned_address, self.port),
+            self.timeout,
+        )
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    def __init__(self, *, host: str, port: int, pinned_address: str, timeout: float) -> None:
+        super().__init__(host, port, timeout=timeout, context=create_default_context())
+        self._pinned_address = pinned_address
+
+    def connect(self) -> None:
+        raw_socket = socket.create_connection(
+            (self._pinned_address, self.port),
+            self.timeout,
+        )
+        try:
+            self.sock = self._context.wrap_socket(raw_socket, server_hostname=self.host)
+        except Exception:
+            raw_socket.close()
+            raise
+
+
+def _header_value(headers: dict[str, str], key: str) -> str | None:
+    return next((value for name, value in headers.items() if name.casefold() == key), None)
+
+
+def _content_encoding(content_type: str) -> str:
+    for item in content_type.split(";")[1:]:
+        name, separator, value = item.strip().partition("=")
+        if separator and name.casefold() == "charset":
+            return value.strip().strip("\"'")
+    return "utf-8"

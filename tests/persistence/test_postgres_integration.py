@@ -184,6 +184,56 @@ def test_postgres_registry_atomically_reserves_duplicate_screening_ids() -> None
         pool.close()
 
 
+def test_postgres_registry_releases_only_pre_checkpoint_failures() -> None:
+    pool = _pool()
+    saver = PostgresSaver(pool)
+    saver.setup()
+    registry = PostgresScreeningIdRegistry(pool)
+    registry.setup()
+    graph = _graph(saver)
+    before_id = f"before-checkpoint-{uuid4()}"
+    after_id = f"after-checkpoint-{uuid4()}"
+
+    class FailsBeforeCheckpoint:
+        checkpointer = saver
+
+        def get_state(self, config):
+            return graph.get_state(config)
+
+        def invoke(self, input, config):
+            raise RuntimeError("pre-checkpoint failure")
+
+    class FailsAfterCheckpoint:
+        checkpointer = saver
+
+        def get_state(self, config):
+            return graph.get_state(config)
+
+        def invoke(self, input, config):
+            graph.invoke(input, config=config)
+            raise RuntimeError("post-checkpoint failure")
+
+    before_app = create_app(graph=FailsBeforeCheckpoint())
+    before_app.state.screening_id_registry = registry
+    after_app = create_app(graph=FailsAfterCheckpoint())
+    after_app.state.screening_id_registry = registry
+    try:
+        with TestClient(before_app, raise_server_exceptions=False) as client:
+            response = client.post("/screenings", json=_submission(before_id))
+        assert response.status_code == 500
+        assert registry.reserve(before_id) is True
+
+        with TestClient(after_app, raise_server_exceptions=False) as client:
+            response = client.post("/screenings", json=_submission(after_id))
+        assert response.status_code == 500
+        assert registry.reserve(after_id) is False
+    finally:
+        saver.delete_thread(after_id)
+        registry.release_if_unstarted(before_id)
+        registry.release_if_unstarted(after_id)
+        pool.close()
+
+
 def test_production_composition_starts_with_postgres_checkpointer() -> None:
     settings = ApplicationSettings(
         _env_file=None,

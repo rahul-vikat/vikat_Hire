@@ -14,6 +14,7 @@ from vikat_hire.collection.portfolio import PortfolioCollector
 from vikat_hire.config.jd_classification import JDClassificationConfiguration
 from vikat_hire.contracts.common import (
     AccessStatus,
+    ApplicabilityStatus,
     DatePrecision,
     DerivationMethod,
     DimensionName,
@@ -201,9 +202,10 @@ def test_nontechnical_flow_skips_github_and_portfolio_and_preserves_seniority() 
     assert normalization is not None
     assert final_state.evaluation is not None
     assert normalization is not None
-    dimensions = {
-        item.dimension: item
-        for item in final_state.evaluation.dimensions
+    dimensions = {item.dimension: item for item in final_state.evaluation.dimensions}
+    assert set(dimensions) == set(DimensionName) - {
+        DimensionName.GITHUB_EVIDENCE,
+        DimensionName.PORTFOLIO_EVIDENCE,
     }
     expected_semantic = aggregate_semantic_fit(
         requirements=normalization.jd_requirements,
@@ -215,8 +217,7 @@ def test_nontechnical_flow_skips_github_and_portfolio_and_preserves_seniority() 
     )
     expected_experience = aggregate_jd_aligned_experience(
         requirement_ids=tuple(
-            requirement.requirement_id
-            for requirement in normalization.jd_experience_requirements
+            requirement.requirement_id for requirement in normalization.jd_experience_requirements
         ),
         evaluations=(),
     )
@@ -226,6 +227,8 @@ def test_nontechnical_flow_skips_github_and_portfolio_and_preserves_seniority() 
     )
     assert experience.resolution is DimensionResolution.EXCLUDED
     assert experience.raw_value is None
+    assert DimensionName.GITHUB_EVIDENCE not in dimensions
+    assert DimensionName.PORTFOLIO_EVIDENCE not in dimensions
     seniority = tuple(
         item
         for item in final_state.evaluation.dimensions
@@ -294,9 +297,7 @@ def test_graph_dimension_assembly_evaluates_aligned_experience() -> None:
     _, dimensions, _ = _require_dimensions_inputs(transport)
 
     experience = next(
-        item
-        for item in dimensions
-        if item.dimension is DimensionName.JD_ALIGNED_EXPERIENCE
+        item for item in dimensions if item.dimension is DimensionName.JD_ALIGNED_EXPERIENCE
     )
     assert experience.resolution is DimensionResolution.EVALUATED
     assert experience.raw_value == Decimal("100.00")
@@ -321,9 +322,7 @@ def test_graph_dimension_assembly_evaluates_aligned_experience() -> None:
     )
     assert scored.score is not None
     experience_audit = next(
-        item
-        for item in scored.score.audit
-        if item.dimension is DimensionName.JD_ALIGNED_EXPERIENCE
+        item for item in scored.score.audit if item.dimension is DimensionName.JD_ALIGNED_EXPERIENCE
     )
     assert experience_audit.weight == Decimal("20")
     assert experience_audit.evidence_refs == ("linkedin-evidence-1",)
@@ -372,9 +371,7 @@ def test_graph_end_to_end_produces_jd_aligned_experience_and_score() -> None:
     final_state, _, normalization = from_orchestration_state(output)
 
     assert normalization is not None
-    assert linkedin_fetcher.calls == [
-        "https://www.linkedin.com/in/graph-user"
-    ]
+    assert linkedin_fetcher.calls == ["https://www.linkedin.com/in/graph-user"]
     assert final_state.evaluation is not None
     dimension = next(
         item
@@ -426,10 +423,18 @@ def test_technical_flow_runs_github_and_portfolio_in_order() -> None:
     assert portfolio_fetcher.calls == ["https://portfolio.example/profile"]
     assert state.evaluation is not None
     assert state.score is not None
-    dimensions = {
-        item.dimension: item
-        for item in state.evaluation.dimensions
-    }
+    dimensions = {item.dimension: item for item in state.evaluation.dimensions}
+    assert set(dimensions) == set(DimensionName)
+    for dimension_name in (DimensionName.GITHUB_EVIDENCE, DimensionName.PORTFOLIO_EVIDENCE):
+        assert dimensions[dimension_name].applicability is ApplicabilityStatus.APPLICABLE
+        assert dimensions[dimension_name].resolution in {
+            DimensionResolution.EVALUATED,
+            DimensionResolution.EXCLUDED,
+        }
+        if dimensions[dimension_name].resolution is DimensionResolution.EXCLUDED:
+            assert dimensions[dimension_name].raw_value is None
+        else:
+            assert dimensions[dimension_name].raw_value is not None
     assert DimensionName.SEMANTIC_FIT in dimensions
     assert DimensionName.JD_ALIGNED_EXPERIENCE in dimensions
     assert DimensionName.MUST_HAVE_COVERAGE in dimensions

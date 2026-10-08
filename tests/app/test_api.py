@@ -330,6 +330,134 @@ def test_registry_does_not_overwrite_checkpoint_created_before_registry() -> Non
     assert registry.reserved_ids == ["legacy-checkpoint"]
 
 
+def test_registry_releases_id_when_execution_fails_before_checkpoint() -> None:
+    class BrokenGraph:
+        checkpointer = object()
+
+        def invoke(self, input, config):
+            raise RuntimeError("failed before checkpoint")
+
+        def get_state(self, config):
+            return type("Snapshot", (), {"values": {}})()
+
+    class Registry:
+        released: list[str] = []
+
+        def reserve(self, screening_id: str) -> bool:
+            return True
+
+        def release_if_unstarted(self, screening_id: str) -> None:
+            self.released.append(screening_id)
+
+    app = create_app(graph=BrokenGraph())
+    registry = Registry()
+    app.state.screening_id_registry = registry
+    client = TestClient(app, raise_server_exceptions=False)
+
+    response = client.post("/screenings", json=_payload("pre-checkpoint-failure"))
+
+    assert response.status_code == 500
+    assert registry.released == ["pre-checkpoint-failure"]
+
+
+def test_registry_keeps_id_when_execution_fails_after_checkpoint() -> None:
+    class BrokenGraph:
+        checkpointer = object()
+        checkpoint_written = False
+
+        def invoke(self, input, config):
+            self.checkpoint_written = True
+            raise RuntimeError("failed after checkpoint")
+
+        def get_state(self, config):
+            values = {"screening_state": {}} if self.checkpoint_written else {}
+            return type("Snapshot", (), {"values": values})()
+
+    class Registry:
+        released: list[str] = []
+
+        def reserve(self, screening_id: str) -> bool:
+            return True
+
+        def release_if_unstarted(self, screening_id: str) -> None:
+            self.released.append(screening_id)
+
+    app = create_app(graph=BrokenGraph())
+    registry = Registry()
+    app.state.screening_id_registry = registry
+    client = TestClient(app, raise_server_exceptions=False)
+
+    response = client.post("/screenings", json=_payload("post-checkpoint-failure"))
+
+    assert response.status_code == 500
+    assert registry.released == []
+
+
+def test_registry_failure_prevents_graph_execution() -> None:
+    class Graph:
+        checkpointer = object()
+        calls = 0
+
+        def invoke(self, input, config):
+            self.calls += 1
+            raise AssertionError("graph must not run when registry reservation fails")
+
+        def get_state(self, config):
+            return type("Snapshot", (), {"values": {}})()
+
+    class Registry:
+        def reserve(self, screening_id: str) -> bool:
+            raise RuntimeError("database unavailable")
+
+        def release_if_unstarted(self, screening_id: str) -> None:
+            raise AssertionError("a failed reservation cannot be released")
+
+    graph = Graph()
+    app = create_app(graph=graph)
+    app.state.screening_id_registry = Registry()
+    client = TestClient(app, raise_server_exceptions=False)
+
+    response = client.post("/screenings", json=_payload("registry-failure"))
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "internal screening service error"}
+    assert graph.calls == 0
+
+
+def test_registry_keeps_reservation_when_checkpoint_lookup_fails() -> None:
+    class Graph:
+        checkpointer = object()
+
+        def invoke(self, input, config):
+            raise AssertionError("checkpoint lookup must complete before execution")
+
+        def get_state(self, config):
+            raise RuntimeError("checkpoint backend unavailable")
+
+    class Registry:
+        reserved: list[str] = []
+        released: list[str] = []
+
+        def reserve(self, screening_id: str) -> bool:
+            self.reserved.append(screening_id)
+            return True
+
+        def release_if_unstarted(self, screening_id: str) -> None:
+            self.released.append(screening_id)
+
+    app = create_app(graph=Graph())
+    registry = Registry()
+    app.state.screening_id_registry = registry
+    client = TestClient(app, raise_server_exceptions=False)
+
+    response = client.post("/screenings", json=_payload("checkpoint-lookup-failure"))
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "internal screening service error"}
+    assert registry.reserved == ["checkpoint-lookup-failure"]
+    assert registry.released == []
+
+
 def test_unexpected_graph_error_has_safe_http_response() -> None:
     class BrokenGraph:
         checkpointer = object()

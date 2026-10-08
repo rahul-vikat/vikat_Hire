@@ -55,13 +55,20 @@ def create_production_app(
             open=False,
         )
         groq_client: Groq | None = None
+        startup_stage = "PostgreSQL connection pool"
+        primary_error: BaseException | None = None
         try:
             pool.open(wait=True)
+
+            startup_stage = "LangGraph PostgreSQL checkpointer setup"
             checkpointer = PostgresSaver(pool)
             checkpointer.setup()
+
+            startup_stage = "screening registry setup"
             screening_registry = PostgresScreeningIdRegistry(pool)
             screening_registry.setup()
 
+            startup_stage = "provider and graph construction"
             linked_in_fetcher = build_linkedin_fetcher(
                 apify_api_token=runtime_settings.apify_api_token.get_secret_value(),
                 apify_actor_id=runtime_settings.apify_linkedin_actor_id,
@@ -120,16 +127,35 @@ def create_production_app(
             app.state.application_settings = runtime_settings
             app.title = runtime_settings.app_name
             yield
-        except Exception:
+        except Exception as exc:
+            primary_error = exc
+            logging.getLogger(__name__).error(
+                "Application startup/runtime failed during %s (%s)",
+                startup_stage,
+                type(exc).__name__,
+            )
             raise ApplicationDependencyError(
-                "production application initialization failed; verify required "
-                "configuration and PostgreSQL connectivity"
-            ) from None
+                f"production application failed during {startup_stage} ({type(exc).__name__})"
+            ) from exc
         finally:
-            if groq_client is not None:
-                groq_client.close()
-            if pool.closed is False:
-                pool.close()
+            for resource_name, close in (
+                ("Groq client", groq_client.close if groq_client is not None else None),
+                ("PostgreSQL pool", pool.close if not pool.closed else None),
+            ):
+                if close is None:
+                    continue
+                try:
+                    close()
+                except Exception as exc:
+                    logging.getLogger(__name__).error(
+                        "Failed to close %s (%s)",
+                        resource_name,
+                        type(exc).__name__,
+                    )
+                    if primary_error is None:
+                        raise ApplicationDependencyError(
+                            f"failed to close {resource_name} ({type(exc).__name__})"
+                        ) from exc
 
     return create_app(
         graph=None,
