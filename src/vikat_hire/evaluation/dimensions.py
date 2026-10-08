@@ -12,6 +12,7 @@ from vikat_hire.contracts.common import (
 from vikat_hire.contracts.evaluation import (
     DimensionEvaluation,
     EvaluationResult,
+    SeniorityScopeEvaluation,
 )
 
 
@@ -104,6 +105,44 @@ def evaluate_dimension(
         requirement_refs=requirement_refs,
         provenance_refs=provenance_refs,
         rationale=rationale,
+    )
+
+
+def evaluate_seniority_dimension(
+    *,
+    evaluation: SeniorityScopeEvaluation,
+) -> DimensionEvaluation:
+    """
+    Convert the authoritative deterministic seniority/scope result into the
+    generic DimensionEvaluation contract.
+
+    This function does not recalculate seniority, alter the raw value, apply
+    the 2.2.0 weight, or interpret review state.
+
+    The scoring layer remains responsible for applying the configured
+    SENIORITY_SCOPE_ALIGNMENT weight.
+    """
+
+    if not isinstance(evaluation, SeniorityScopeEvaluation):
+        raise DimensionEvaluationError(
+            "evaluation must be a SeniorityScopeEvaluation"
+        )
+
+    if evaluation.dimension is not DimensionName.SENIORITY_SCOPE_ALIGNMENT:
+        raise DimensionEvaluationError(
+            "seniority evaluation must use "
+            "SENIORITY_SCOPE_ALIGNMENT dimension"
+        )
+
+    return evaluate_dimension(
+        dimension=DimensionName.SENIORITY_SCOPE_ALIGNMENT,
+        applicability=ApplicabilityStatus.APPLICABLE,
+        resolution=evaluation.resolution,
+        raw_value=evaluation.raw_value,
+        exclusion_reason=evaluation.exclusion_reason,
+        evidence_refs=evaluation.evidence_refs,
+        provenance_refs=evaluation.provenance_refs,
+        rationale=evaluation.rationale,
     )
 
 
