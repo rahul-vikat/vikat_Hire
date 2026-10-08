@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date
 
 import pytest
@@ -67,6 +68,46 @@ def test_linkedin_uses_conservative_explicit_skill_parsing() -> None:
     ]
 
     assert result.skills[0].source_type is SourceType.LINKEDIN
+
+
+def test_linkedin_apify_dataset_experience_flows_into_normalization() -> None:
+    block = _block(
+        json.dumps(
+            [
+                {
+                    "experience": [
+                        {
+                            "position": "Engineer",
+                            "companyName": "Example",
+                            "startDate": {"month": 1, "year": 2020},
+                            "endDate": {"month": 12, "year": 2022},
+                            "description": "Built backend services.",
+                        }
+                    ]
+                }
+            ]
+        ),
+        source_type=SourceType.LINKEDIN,
+        source_ref="linkedin-structured",
+        block_id="linkedin-structured-block",
+    )
+
+    result = normalize_external_sources(
+        blocks=(block,),
+        screening_id="screening-001",
+        source_states={
+            "linkedin-structured": NormalizedSourceState.AVAILABLE,
+        },
+    )
+
+    assert len(result.experience_records) == 1
+    record = result.experience_records[0]
+    assert record.role == "Engineer"
+    assert record.employer == "Example"
+    assert record.source_type is SourceType.LINKEDIN
+    assert record.source_ref == "linkedin-structured"
+    assert record.evidence_refs == ("linkedin-structured-block",)
+    assert record.provenance_refs == ("linkedin-structured:source",)
 
 
 def test_github_scope_evidence_is_factual_only() -> None:

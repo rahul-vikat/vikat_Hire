@@ -88,6 +88,51 @@ def test_normalizes_multiple_experience_entries_in_source_order() -> None:
     assert [record.employer for record in records] == ["A", "B"]
 
 
+def test_normalizes_apify_dataset_array_envelope() -> None:
+    block = ExtractedTextBlock(
+        block_id="linkedin-dataset-block",
+        source_type=SourceType.LINKEDIN,
+        source_ref="linkedin-001",
+        text=json.dumps(
+            [
+                {"name": "Candidate", "skills": ["Python"]},
+                {
+                    "experience": [
+                        {
+                            "position": "Engineer",
+                            "companyName": "Example",
+                            "startDate": {"year": 2020},
+                            "endDate": {"text": "Present"},
+                        }
+                    ]
+                },
+            ]
+        ),
+        extraction_kind=ExtractionKind.PLAIN_TEXT,
+        provenance_refs=("linkedin-provenance",),
+    )
+
+    records = normalize_linkedin_experience(block=block)
+
+    assert len(records) == 1
+    assert records[0].record_id == "linkedin-dataset-block:experience:0"
+    assert records[0].role == "Engineer"
+    assert records[0].employer == "Example"
+
+
+def test_dataset_items_without_experience_produce_no_records() -> None:
+    block = ExtractedTextBlock(
+        block_id="linkedin-dataset-block",
+        source_type=SourceType.LINKEDIN,
+        source_ref="linkedin-001",
+        text=json.dumps([{"name": "Jane Doe", "skills": ["Python"]}]),
+        extraction_kind=ExtractionKind.PLAIN_TEXT,
+        provenance_refs=("linkedin-provenance",),
+    )
+
+    assert normalize_linkedin_experience(block=block) == ()
+
+
 def test_explicit_end_date_is_not_current() -> None:
     record = normalize_linkedin_experience(
         block=_block(
@@ -188,13 +233,13 @@ def test_malformed_json_fails() -> None:
 
 
 def test_non_object_payload_and_non_list_experience_fail() -> None:
-    with pytest.raises(LinkedInNormalizationError, match="JSON object"):
+    with pytest.raises(LinkedInNormalizationError, match="JSON object or dataset list"):
         normalize_linkedin_experience(
             block=ExtractedTextBlock(
                 block_id="linkedin-block",
                 source_type=SourceType.LINKEDIN,
                 source_ref="linkedin-1",
-                text="[]",
+                text="1",
                 extraction_kind=ExtractionKind.PLAIN_TEXT,
                 provenance_refs=("linkedin-provenance",),
             )

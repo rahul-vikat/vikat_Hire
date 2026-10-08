@@ -21,10 +21,14 @@ def normalize_linkedin_experience(
     *,
     block: ExtractedTextBlock,
 ) -> tuple[NormalizedExperienceRecord, ...]:
-    """Normalize factual employment entries from a LinkedIn JSON object.
+    """Normalize employment entries inside an Apify dataset envelope.
 
     This parser does not match JD requirements, calculate durations, infer
     skills or responsibilities, classify seniority, or score candidates.
+
+    Apify dataset output is a JSON list of profile-item objects. A single
+    profile object is also accepted for direct callers. Dataset items without
+    an ``experience`` field contribute no experience records.
     """
     if not isinstance(block, ExtractedTextBlock):
         raise LinkedInNormalizationError(
@@ -36,27 +40,39 @@ def normalize_linkedin_experience(
         )
 
     payload = _parse_payload(block.text)
-    if "experience" not in payload:
-        raise LinkedInNormalizationError(
-            "LinkedIn payload is missing required 'experience' field"
-        )
-    experience = payload["experience"]
-    if not isinstance(experience, list):
-        raise LinkedInNormalizationError(
-            "LinkedIn payload 'experience' must be a list"
-        )
+    profile_items = payload if isinstance(payload, list) else [payload]
+    records: list[NormalizedExperienceRecord] = []
 
-    return tuple(
-        _normalize_experience_record(
-            raw_record=raw_record,
-            block=block,
-            index=index,
-        )
-        for index, raw_record in enumerate(experience)
-    )
+    for profile_index, profile in enumerate(profile_items):
+        if not isinstance(profile, dict):
+            raise LinkedInNormalizationError(
+                f"LinkedIn dataset item[{profile_index}] must be an object"
+            )
+        if "experience" not in profile:
+            if isinstance(payload, dict):
+                raise LinkedInNormalizationError(
+                    "LinkedIn payload is missing required 'experience' field"
+                )
+            continue
+
+        experience = profile["experience"]
+        if not isinstance(experience, list):
+            raise LinkedInNormalizationError(
+                f"LinkedIn dataset item[{profile_index}].experience must be a list"
+            )
+        for raw_record in experience:
+            records.append(
+                _normalize_experience_record(
+                    raw_record=raw_record,
+                    block=block,
+                    index=len(records),
+                )
+            )
+
+    return tuple(records)
 
 
-def _parse_payload(text: str) -> dict[str, Any]:
+def _parse_payload(text: str) -> dict[str, Any] | list[Any]:
     if not isinstance(text, str):
         raise LinkedInNormalizationError(
             "LinkedIn extracted content must be text"
@@ -71,9 +87,9 @@ def _parse_payload(text: str) -> dict[str, Any]:
         raise LinkedInNormalizationError(
             f"LinkedIn payload is not valid JSON: {exc.msg}"
         ) from exc
-    if not isinstance(payload, dict):
+    if not isinstance(payload, (dict, list)):
         raise LinkedInNormalizationError(
-            "LinkedIn payload must be a JSON object"
+            "LinkedIn payload must be a JSON object or dataset list"
         )
     return payload
 
