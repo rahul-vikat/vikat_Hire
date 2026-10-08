@@ -42,9 +42,13 @@ def validate_input_state(transport: OrchestrationState) -> OrchestrationState:
     A future graph must place this adapter before interrupt_missing_input so its
     checkpoint already explicitly contains WAITING_FOR_INPUT and missing keys.
     """
-    state, blocks = from_orchestration_state(transport)
+    state, blocks, normalization = from_orchestration_state(transport)
     validated = validate_input_node(state, extracted_blocks=blocks)
-    return to_orchestration_state(validated, extracted_blocks=blocks)
+    return to_orchestration_state(
+        validated,
+        extracted_blocks=blocks,
+        normalization=normalization,
+    )
 
 
 def _require_waiting(state: ScreeningState) -> None:
@@ -59,7 +63,7 @@ def resume_missing_input(
     payload: dict,
 ) -> OrchestrationState:
     """Apply only input data and revalidate; partial input remains waiting."""
-    state, _ = from_orchestration_state(transport)
+    state, _, _ = from_orchestration_state(transport)
     _require_waiting(state)
     if not isinstance(payload, dict):
         raise InputInterruptionError("resume payload must be a mapping")
@@ -80,7 +84,7 @@ def interrupt_missing_input(transport: OrchestrationState) -> OrchestrationState
     Partial replies interrupt again, with updated missing keys. Their inputs are
     retained by LangGraph's resume log until this node returns its final update.
     """
-    state, _ = from_orchestration_state(transport)
+    state, _, _ = from_orchestration_state(transport)
     _require_waiting(state)
     while state.required_inputs_missing:
         payload = interrupt(
@@ -93,7 +97,7 @@ def interrupt_missing_input(transport: OrchestrationState) -> OrchestrationState
             }
         )
         transport = resume_missing_input(transport, payload)
-        state, _ = from_orchestration_state(transport)
+        state, _, _ = from_orchestration_state(transport)
     return transport
 
 
@@ -104,7 +108,7 @@ def create_input_checkpoint(transport: OrchestrationState) -> Checkpoint:
     LangGraph transport and must be supplied explicitly on domain-only restore.
     No revision increment, locking, or backend semantics are introduced.
     """
-    state, _ = from_orchestration_state(transport)
+    state, _, _ = from_orchestration_state(transport)
     _require_waiting(state)
     return Checkpoint(
         screening_id=state.screening_id,

@@ -58,7 +58,7 @@ def test_checkpoint_roundtrip_preserves_every_field(screening_state, extracted_b
     assert checkpoint.current_node == screening_state.current_node
     assert checkpoint.state.status is WorkflowStatus.WAITING_FOR_INPUT
     result = resume_missing_input(restored, _payload(screening_state, extracted_blocks))
-    resumed, blocks = from_orchestration_state(result)
+    resumed, blocks, _ = from_orchestration_state(result)
     assert blocks == extracted_blocks
     assert resumed == screening_state.model_copy(update={"status": WorkflowStatus.EVALUATING})
 
@@ -67,7 +67,7 @@ def test_partial_resume_remains_waiting_and_preserves_original(screening_state, 
     waiting = _waiting(screening_state)
     before = deepcopy(waiting)
     partial = resume_missing_input(waiting, _payload(screening_state, extracted_blocks[:1]))
-    state, blocks = from_orchestration_state(partial)
+    state, blocks, _ = from_orchestration_state(partial)
     assert state.required_inputs_missing == ("resume.extracted_content",)
     assert state.status is WorkflowStatus.WAITING_FOR_INPUT
     assert blocks == extracted_blocks[:1]
@@ -145,7 +145,9 @@ def test_resume_rejects_wrong_identity_and_stale_extraction(screening_state, ext
 def test_replacement_metadata_is_validated(screening_state, extracted_blocks):
     payload = _payload(screening_state, extracted_blocks)
     payload["screening_input"]["jd"]["filename"] = " "
-    result, _ = from_orchestration_state(resume_missing_input(_waiting(screening_state), payload))
+    result, _, _ = from_orchestration_state(
+        resume_missing_input(_waiting(screening_state), payload)
+    )
     assert result.required_inputs_missing == ("jd.filename",)
     assert result.status is WorkflowStatus.WAITING_FOR_INPUT
 
@@ -167,7 +169,7 @@ def test_real_langgraph_interrupt_partial_resume_and_reconstruction(
         "required_inputs_missing": ["jd.extracted_content", "resume.extracted_content"],
     }
     snapshot = graph.get_state(config)
-    state, _ = from_orchestration_state(snapshot.values)
+    state, _, _ = from_orchestration_state(snapshot.values)
     assert state.status is WorkflowStatus.WAITING_FOR_INPUT
     assert state.revision == 7
     assert snapshot.next == ("interrupt",)
@@ -179,7 +181,7 @@ def test_real_langgraph_interrupt_partial_resume_and_reconstruction(
     graph = _graph(saver)
     result = graph.invoke(Command(resume=_payload(screening_state, extracted_blocks)), config)
     assert "__interrupt__" not in result
-    state, blocks = from_orchestration_state(result)
+    state, blocks, _ = from_orchestration_state(result)
     assert state == screening_state.model_copy(update={"status": WorkflowStatus.EVALUATING})
     assert blocks == extracted_blocks
     assert graph.get_state(config).next == ()
@@ -201,7 +203,7 @@ def test_real_langgraph_wrong_resume_fails_without_advancing(screening_state, ex
     payload["screening_input"]["screening_id"] = "other"
     with pytest.raises(InputInterruptionError, match="screening_id"):
         graph.invoke(Command(resume=payload), config)
-    state, _ = from_orchestration_state(graph.get_state(config).values)
+    state, _, _ = from_orchestration_state(graph.get_state(config).values)
     assert state.status is WorkflowStatus.WAITING_FOR_INPUT
     assert state.score == screening_state.score
 
@@ -213,7 +215,7 @@ def test_unrelated_missing_input_cannot_be_cleared_by_resume(screening_state, ex
     graph.invoke(to_orchestration_state(state, extracted_blocks=()), config)
     result = graph.invoke(Command(resume=_payload(state, extracted_blocks)), config)
     assert result["__interrupt__"][0].value["required_inputs_missing"] == ["other.required"]
-    saved, _ = from_orchestration_state(graph.get_state(config).values)
+    saved, _, _ = from_orchestration_state(graph.get_state(config).values)
     assert saved.status is WorkflowStatus.WAITING_FOR_INPUT
     # Verify the actual pause across another invocation, rather than relying on
     # snapshot.next while LangGraph has pending resume writes for the same task.
@@ -254,7 +256,7 @@ def test_resume_can_correct_blank_metadata_without_losing_results(
         to_orchestration_state(blank_state, extracted_blocks=extracted_blocks)
     )
     assert from_orchestration_state(waiting)[0].required_inputs_missing == ("jd.filename",)
-    result, _ = from_orchestration_state(
+    result, _, _ = from_orchestration_state(
         resume_missing_input(
             waiting,
             _payload(screening_state, extracted_blocks),

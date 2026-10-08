@@ -35,7 +35,7 @@ def collect_portfolio_node(
             "collector must be a PortfolioCollector"
         )
 
-    state, existing_blocks = from_orchestration_state(transport)
+    state, existing_blocks, _ = from_orchestration_state(transport)
 
     _validate_state(state)
 

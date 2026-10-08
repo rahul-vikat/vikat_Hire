@@ -21,7 +21,7 @@ def extraction_document(
     content: bytes,
     provenance_refs: tuple[str, ...],
 ) -> DocumentInput:
-    state, blocks = from_orchestration_state(transport)
+    state, blocks, _ = from_orchestration_state(transport)
     document = state.screening_input.jd if kind is InputKind.JD else state.screening_input.resume
     if document.kind is not kind:
         raise ExtractionNodeError("document kind does not match extraction node")
@@ -43,7 +43,7 @@ def attach_extraction(
     result: tuple[ExtractedTextBlock, ...],
     provenance_refs: tuple[str, ...],
 ) -> OrchestrationState:
-    state, existing = from_orchestration_state(transport)
+    state, existing, _ = from_orchestration_state(transport)
     if not isinstance(result, tuple) or not result:
         raise ExtractionNodeError("extractor must return a non-empty tuple of ExtractedTextBlock")
     expected_source = (

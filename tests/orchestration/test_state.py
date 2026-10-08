@@ -16,9 +16,10 @@ from vikat_hire.orchestration.state import (
 
 def test_roundtrip_preserves_all_domain_fields_and_extraction(screening_state, extracted_blocks):
     transport = to_orchestration_state(screening_state, extracted_blocks=extracted_blocks)
-    state, blocks = from_orchestration_state(transport)
+    state, blocks, normalization = from_orchestration_state(transport)
     assert state == screening_state
     assert blocks == extracted_blocks
+    assert normalization is None
     assert state.score.score == Decimal("74.94")
     assert isinstance(state.evidence[0].content["nested"]["value"], Decimal)
     with pytest.raises(ValidationError):
@@ -27,7 +28,8 @@ def test_roundtrip_preserves_all_domain_fields_and_extraction(screening_state, e
 
 def test_transport_and_decoded_state_do_not_alias_original(screening_state, extracted_blocks):
     transport = to_orchestration_state(screening_state, extracted_blocks=extracted_blocks)
-    state, _ = from_orchestration_state(transport)
+    state, _, normalization = from_orchestration_state(transport)
+    assert normalization is None
     transport["screening_state"]["evidence"][0]["content"]["nested"]["value"] = 0
     state.provenances[0].locator["page"] = "changed"
     assert screening_state.evidence[0].content["nested"]["value"] == Decimal("12.34")
@@ -135,9 +137,10 @@ def test_roundtrip_preserves_workflow_and_nonempty_reviews(
         }
     )
     transport = to_orchestration_state(state, extracted_blocks=extracted_blocks)
-    decoded, blocks = from_orchestration_state(transport)
+    decoded, blocks, normalization = from_orchestration_state(transport)
     assert decoded == state
     assert blocks == extracted_blocks
+    assert normalization is None
     assert decoded.pending_reviews == (review,)
     assert decoded.updated_at == state.updated_at
     # Conversion preserves state; it must not make routing or review decisions.
@@ -148,9 +151,10 @@ def test_roundtrip_preserves_workflow_and_nonempty_reviews(
 def test_conversion_is_repeatable_and_does_not_change_transport(screening_state, extracted_blocks):
     transport = to_orchestration_state(screening_state, extracted_blocks=extracted_blocks)
     original = deepcopy(transport)
-    first_state, first_blocks = from_orchestration_state(transport)
-    second_state, second_blocks = from_orchestration_state(transport)
+    first_state, first_blocks, first_normalization = from_orchestration_state(transport)
+    second_state, second_blocks, second_normalization = from_orchestration_state(transport)
     assert first_state == second_state == screening_state
     assert first_blocks == second_blocks == extracted_blocks
+    assert first_normalization is second_normalization is None
     assert transport == original
     assert to_orchestration_state(first_state, extracted_blocks=first_blocks) == original

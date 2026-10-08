@@ -28,7 +28,7 @@ def test_extraction_preserves_state_and_other_blocks(screening_state, extracted_
     transport = to_orchestration_state(screening_state, extracted_blocks=other)
     before = deepcopy(transport)
     result = node(transport, content=b"Python developer", provenance_refs=("prov-new",))
-    state, blocks = from_orchestration_state(result)
+    state, blocks, _ = from_orchestration_state(result)
     assert state == screening_state
     assert blocks[:-1] == other
     assert blocks[-1].source_ref == f"{name}-1"
@@ -134,7 +134,7 @@ def test_resume_adapter_uses_existing_ocr_fallback(screening_state):
         provenance_refs=("ocr-prov",),
         ocr_text_extractor=ocr,
     )
-    restored, blocks = from_orchestration_state(result)
+    restored, blocks, _ = from_orchestration_state(result)
     assert len(calls) == 1
     assert restored == state
     assert blocks[0].extraction_kind is ExtractionKind.OCR_TEXT

@@ -34,7 +34,7 @@ def collect_github_node(
             "collector must be a GitHubCollector"
         )
 
-    state, existing_blocks = from_orchestration_state(transport)
+    state, existing_blocks, _ = from_orchestration_state(transport)
 
     _validate_state(state)
 
