@@ -11,16 +11,27 @@ from vikat_hire.contracts.common import (
     DimensionResolution,
     ExclusionReason,
     InputKind,
+    MatchStatus,
+    RequirementCategory,
+    RequirementImportance,
     ScopeLevel,
+    SourceType,
 )
 from vikat_hire.contracts.evaluation import (
     DimensionEvaluation,
+    ExperienceEvaluation,
     ScopeAlignmentAssessment,
     SeniorityScopeEvaluation,
 )
 from vikat_hire.contracts.inputs import DocumentInput, ScreeningInput
+from vikat_hire.contracts.matching import SemanticMatch
+from vikat_hire.contracts.normalization import JDRequirement
 from vikat_hire.contracts.state import ScreeningState
 from vikat_hire.evaluation.dimensions import DimensionEvaluationError
+from vikat_hire.evaluation.jd_aligned_experience import (
+    aggregate_jd_aligned_experience,
+)
+from vikat_hire.evaluation.semantic_fit import aggregate_semantic_fit
 from vikat_hire.orchestration.nodes.evaluate_dimensions import (
     DimensionEvaluationNodeError,
     evaluate_dimensions_node,
@@ -248,3 +259,57 @@ def test_final_evaluation_is_deterministic() -> None:
     assert first.model_dump(exclude=exclude) == second.model_dump(
         exclude=exclude
     )
+
+
+def test_aggregated_semantic_and_experience_dimensions_assemble_cleanly() -> None:
+    requirement = JDRequirement(
+        requirement_id="req-1",
+        category=RequirementCategory.EXPERIENCE,
+        importance=RequirementImportance.MUST_HAVE,
+        text="Two years of backend experience",
+        source_type=SourceType.JD_FILE,
+        source_ref="jd-1",
+        evidence_refs=("jd-evidence-1",),
+        provenance_refs=("jd-provenance-1",),
+    )
+    semantic_dimension = aggregate_semantic_fit(
+        requirements=(requirement,),
+        matches=(
+            SemanticMatch(
+                requirement_id="req-1",
+                status=MatchStatus.PARTIAL,
+                score=Decimal("75"),
+                rationale="Deterministic partial match.",
+                provenance_refs=("match-provenance-1",),
+            ),
+        ),
+    )
+    experience_dimension = aggregate_jd_aligned_experience(
+        requirement_ids=("req-1",),
+        evaluations=(
+            ExperienceEvaluation(
+                requirement_id="req-1",
+                resolution=DimensionResolution.EVALUATED,
+                aligned_months=18,
+                aligned_years=Decimal("1.50"),
+                required_years=Decimal("2"),
+                raw_value=Decimal("75"),
+                evidence_refs=("experience-evidence-1",),
+                provenance_refs=("resume-provenance-1",),
+                rationale="Deterministic experience evaluation.",
+            ),
+        ),
+    )
+
+    result = evaluate_dimensions_node(
+        _state(),
+        dimensions=(semantic_dimension, experience_dimension),
+    )
+
+    assert result.evaluation is not None
+    values = {
+        item.dimension: item.raw_value
+        for item in result.evaluation.dimensions
+    }
+    assert values[DimensionName.SEMANTIC_FIT] == Decimal("75.00")
+    assert values[DimensionName.JD_ALIGNED_EXPERIENCE] == Decimal("75.00")
