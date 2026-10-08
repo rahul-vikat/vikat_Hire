@@ -1,16 +1,22 @@
 # Research Scoring Rubric v1
 
 **Version:** `1.0.0` (target version; not frozen)  
-**Status:** `PROPOSED / REQUIRES APPROVAL`  
+**Status:** `REQUIRES HUMAN APPROVAL` (partial policy decisions recorded)
 **Scope:** Display-only company and college research  
 **Implementation status:** Blocked pending approval of the decisions identified below
 
+> **Execution gate:** No research fact scoring, dimension scoring, or overall
+> rank calculation is authorized until the human-policy blockers in Section 9
+> are explicitly approved. The NIRF table below is illustrative only and is
+> not an executable mapping or a scoring-test oracle.
+
 ## 1. Purpose and authority
 
-This document records the approved scoring boundaries and identifies the
-dimension-specific decisions that remain unspecified. It is not an executable
-rubric. No score mapping, threshold, weighting, or conflict-resolution rule is
-authorized by this document unless explicitly marked **APPROVED**.
+This document records the policy decisions provided by the human policy owner
+and identifies the decisions that still prevent an implementation-ready rubric.
+It is not an executable rubric. Rules explicitly marked **APPROVED** below
+reflect the supplied policy. Unresolved items remain blockers; no threshold,
+mapping, or conflict rule may be inferred to fill them.
 
 Research results are informational/display-only. They must not affect candidate
 evaluation, the VerifyHire 2.2.0 score, policy, gates, eligibility, seniority,
@@ -44,27 +50,73 @@ editions, certification status, or other score inputs. A future implementation
 must not silently turn unstructured text or a relevance-term match into a
 scoreable fact.
 
+### 2.1 Evidence contract gap
+
+`RawResearchResult` and the generic `Evidence` contract do not represent the
+approved normalized-fact requirements as a typed research fact. Missing
+research-specific fields include fact type, normalized metric/value, relevant
+unit/currency, period/edition, scope, deterministic fact identity, supporting
+source-observation references, and a structured unresolved-conflict link.
+Provenance records preserve source observations but do not replace these fact
+fields.
+
+After the policy blockers are resolved, the smallest likely contract change is
+a research-specific normalized-fact contract containing only the fields
+required by the approved fact rules and linking each fact to its original
+observation/provenance. Whether conflict state belongs on that fact contract or
+in a linked conflict record depends on the still-unapproved conflict policy.
+No contract is added in this specification-only step.
+
 ## 3. Approved v1 rules
 
 The following top-level rules are **APPROVED**:
 
-1. A scored dimension uses the inclusive numeric range `0–100`.
-2. A dimension supports `SCORED`, `INSUFFICIENT_EVIDENCE`, `CONFLICTED`, and
-   `NOT_APPLICABLE`. `NOT_APPLICABLE` is reserved for future applicability
-   cases and is not expected for the current fixed dimensions.
-3. Absence of evidence is not score `0`. Zero is permitted only when an
-   approved mapping explicitly assigns zero to qualifying evidence.
-4. An overall rank is emitted only when every applicable dimension is
-   `SCORED`; otherwise `overall_rank = None`. Partial overall ranks are
-   prohibited.
-5. No source-quality weighting, universal recency weighting, cross-system
-   ranking normalization, LLM scoring authority, or search-result-count bonus
-   is permitted.
-6. No research result may flow into candidate scoring, policy, eligibility,
-   seniority, or hiring decisions.
+1. Dimension and overall scores are Decimal values from `0.00` through
+   `100.00`, inclusive. Calculations use Decimal; round only at the final
+   output boundary using `ROUND_HALF_UP` to two decimal places.
+2. A score represents the strength of verified research evidence available to
+   V-Hire under configured rules. It is not an absolute claim about the real-
+   world quality or worth of an organization.
+3. Evidence states are `SUFFICIENT`, `INSUFFICIENT`, and `UNAVAILABLE`.
+   Dimension evaluation states are `SCORED`, `INSUFFICIENT_EVIDENCE`,
+   `CONFLICTED`, and `NOT_APPLICABLE`. Their mapping to each other remains
+   unresolved where stated below.
+4. No qualifying evidence must not become score zero. Insufficient public
+   information must not automatically imply poor performance. Zero is only
+   permitted where an explicit approved rule maps qualifying evidence to zero.
+5. Overall rank is emitted only if every applicable dimension is `SCORED`;
+   otherwise it is `None`. Partial overall ranks are prohibited.
+6. Search-result count does not contribute to score. Source quality is not a
+   score weight. There is no universal recency multiplier. The supplied policy
+   says to prefer the latest valid fact within a configured recency policy;
+   that policy is not yet defined and remains a blocker.
+7. Cross-system ranking normalization is prohibited. Ranking mappings must be
+   system-specific and configuration-driven.
+8. LLMs have no scoring authority. SearXNG is retrieval only; search relevance
+   is not a V-Hire score. Scoring consumes normalized facts, not scraped raw
+   text, and must not invent facts from snippets.
+9. Research is isolated from candidate suitability scoring, VerifyHire 2.2.0
+   scoring, policy, gates, eligibility, seniority, and hiring decisions.
 
-These rules do **not** determine any dimension’s fact-to-score mapping or the
-overall aggregation formula.
+These rules do not determine score mappings for eight dimensions. The supplied
+NIRF example mapping is recorded below; other ranking systems/categories have
+no approved mapping. Overall aggregation weights/formulas are recorded in
+Section 7.
+
+### 3.1 Approved score interpretation bands
+
+| Score interval | Label |
+|---|---|
+| 90.00–100.00 | Very strong |
+| 75.00–89.99 | Strong |
+| 60.00–74.99 | Moderate |
+| 40.00–59.99 | Limited |
+| 20.00–39.99 | Weak |
+| 0.00–19.99 | Very weak / little positive evidence |
+
+These labels describe strength of verified research evidence under the rubric,
+not intrinsic organizational quality. The bands do not supply fact-to-score
+rules.
 
 ## 4. Common evidence and result requirements
 
@@ -85,8 +137,9 @@ The future contract must represent, at minimum:
 
 ```text
 dimension
-state: SCORED | INSUFFICIENT_EVIDENCE | CONFLICTED | NOT_APPLICABLE
-score: Decimal/integer in [0, 100] when SCORED; otherwise None
+evidence_state: SUFFICIENT | INSUFFICIENT | UNAVAILABLE
+evaluation_state: SCORED | INSUFFICIENT_EVIDENCE | CONFLICTED | NOT_APPLICABLE
+score: Decimal in [0.00, 100.00] when SCORED; otherwise None
 rationale
 accepted evidence/result references
 provenance references
@@ -106,28 +159,61 @@ approved.
 - Repeated search observations are not independent facts merely because they
   appear more than once.
 - No bonus may be assigned solely for the number of results or sources.
-- No universal recency weighting is applied. Evidence expiry, validity windows,
-  or dimension-specific recency requirements are not defined by the approved
-  rules and remain unspecified.
+- No source-quality score weighting or universal recency multiplier is
+  applied. The configured source-credibility eligibility rule and any
+  dimension-specific recency/validity selection policy remain unspecified.
 - The evaluator must be deterministic, pure, and reproducible for identical
   evidence and the same rubric version.
 
-### 4.4 Unspecified common rules
+### 4.4 Owner-approved fact-handling rules
+
+- A normalized fact must retain entity identity, dimension, fact type, value,
+  applicable unit/currency, period/edition, scope, source observation, and
+  provenance. Not every field applies to every fact type; required fields
+  below remain to be finalized where noted.
+- Multiple websites reporting one underlying fact produce one normalized fact
+  with multiple supporting source/provenance references. Corroboration does
+  not multiply the fact value or award a source-count score bonus.
+- Different periods, scopes, programs, and metric types must not be blindly
+  averaged or substituted for one another.
+- Unverifiable claims do not become negative facts. Conflicting facts are
+  preserved; do not arbitrarily select one. An unresolved material conflict
+  leaves the fact unresolved and excludes it from deterministic scoring.
+- Explicitly distinct quantities remain distinct: paid-up capital is not
+  valuation; revenue is not valuation or funding; highest package is not
+  average package or median salary.
+- No scoring code may scrape or infer facts directly from raw search text.
+
+### 4.5 Evidence-state semantics still requiring resolution
+
+The supplied policy describes `SUFFICIENT`, `INSUFFICIENT`, and `UNAVAILABLE`
+as evidence states, and separately requires the four dimension evaluation
+states. It does not specify the complete conversion table. At minimum,
+`INSUFFICIENT` evidence cannot yield a score; absence of qualifying evidence
+must not yield zero. The exact distinction between `INSUFFICIENT` and
+`UNAVAILABLE`, and their mapping to `INSUFFICIENT_EVIDENCE` versus
+`NOT_APPLICABLE`, requires approval. No current company/college dimension is
+approved as not applicable by default.
+
+### 4.6 Remaining common policy questions
 
 The following remain **UNSPECIFIED — REQUIRES APPROVAL**:
 
-- what constitutes a normalized/identical underlying fact across results;
-- what qualifies as independent corroboration;
-- whether and how corroboration affects a score;
+- how the proposed fact-identity tuple is normalized (including metric/value,
+  unit, period, and scope canonicalization);
+- how independent sources are distinguished from copied/syndicated sources;
+- what makes a source credible enough to admit a fact, and how source
+  authority is considered in conflict resolution. This is an eligibility/
+  precedence rule, not an approved score weight;
+- which recency/validity policy selects the latest valid fact for each
+  dimension, without a universal score multiplier;
 - how a fact is considered attributable to the entity when evidence text is
   ambiguous after the existing entity-validation stage;
-- how to classify unverifiable claims beyond preserving them without score;
 - the exact conditions that constitute a material conflict;
 - conflict behavior for different periods, methodologies, units, currencies,
   populations, and minor numerical discrepancies;
 - whether any disputed fact can be excluded while other facts still score the
   dimension, or whether it makes the whole dimension `CONFLICTED`;
-- the score precision and rounding mode for dimension values;
 - any conversion from extracted text to a typed fact.
 
 Until these decisions are approved, no implementation may resolve them using
@@ -135,10 +221,11 @@ heuristics, general knowledge, or LLM judgment.
 
 ## 5. Dimension rubrics
 
-For all dimensions below, the listed fact families are candidate inputs to the
-rubric discussion, not approved scoring mappings. They become scoreable only
-after the required facts, conditions, and exact score/band mapping are
-explicitly approved. Every mapping currently reads:
+For all dimensions below, the listed fact families are accepted fact types for
+normalization, as supplied by the policy owner. Acceptance as a fact type does
+not itself make a fact scoreable. A fact becomes scoreable only when required
+fields, qualifying conditions, and an exact score/band mapping are defined.
+Mappings not shown as approved below read:
 
 ```text
 fact/condition → score: UNSPECIFIED — REQUIRES APPROVAL
@@ -146,8 +233,9 @@ fact/condition → score: UNSPECIFIED — REQUIRES APPROVAL
 
 ### 5.1 Company: `financial_valuation`
 
-**Candidate fact families:** funding rounds and amounts; revenue; valuation;
-profitability; financial growth/trajectory.
+**Owner-approved fact families:** funding, funding rounds/amounts, valuation,
+revenue, profit/loss where available, paid-up capital, authorized capital,
+investors, and other explicitly configured financial metrics.
 
 **Non-scoreable by themselves under current approval:** a funding announcement,
 an absolute revenue/valuation amount, investor names, or a generic claim of
@@ -170,8 +258,10 @@ not be combined by an invented arithmetic formula.
 
 ### 5.2 Company: `market_position`
 
-**Candidate fact families:** customer counts/reach; market share; product
-adoption; competitor comparisons; documented market-position claims.
+**Owner-approved fact families:** customers and enterprise customers, customer
+counts/reach, revenue/customer evidence, market share, products, market
+presence, adoption, partnerships, competitors, industry position, and
+geographic presence.
 
 **Non-scoreable by themselves under current approval:** product descriptions,
 customer names without a defined interpretation, unsubstantiated marketing
@@ -192,8 +282,10 @@ rules are `UNSPECIFIED — REQUIRES APPROVAL`.
 
 ### 5.3 Company: `engineering_technical`
 
-**Candidate fact families:** patents; research; documented technologies and
-technical capabilities; engineering output; architecture/platform facts.
+**Owner-approved fact families:** technology/platform, engineering
+capabilities, AI/security technology, R&D, patents, technical publications,
+technical products, technical architecture, and engineering capability
+evidence.
 
 **Non-scoreable by themselves under current approval:** an AI/technology
 mention, a product feature list, a patent count without an interpretation, or
@@ -214,9 +306,14 @@ combine, and how they combine, is `UNSPECIFIED — REQUIRES APPROVAL`.
 
 ### 5.4 Company: `reputation_compliance`
 
-**Candidate fact families:** certifications and their status; compliance
-findings; regulatory events; security incidents; attributable reputation
-evidence.
+**Owner-approved fact families:** ISO 27001, SOC 2, GDPR, HIPAA, configured
+compliance/security certifications, regulatory approvals/findings, audits,
+credible reputation signals, and other explicitly configured credentials.
+
+For certifications preserve certification, status, scope, validity, issuer,
+and source/provenance. A generic security statement is not proof of a
+certification. Exact source-credibility rules and status-to-score mappings
+remain unresolved.
 
 **Non-scoreable by themselves under current approval:** a certification name
 without status/scope, a generic security/compliance claim, and absence of
@@ -237,8 +334,9 @@ conflicting status reports, and the material-conflict rule are
 
 ### 5.5 College: `official_ranking`
 
-**Candidate fact families:** named ranking system (including NIRF, QS, THE, or
-another explicitly identified system), rank, category, and edition/year.
+**Owner-approved systems:** NIRF, QS, and THE. Preserve system, category, rank,
+year/edition, and source/provenance. Mappings are system/category-specific;
+cross-system normalization is prohibited.
 
 **Non-scoreable by themselves under current approval:** an unlabelled rank,
 ranking-system mention, ranking query membership, or ranking evidence lacking
@@ -248,19 +346,36 @@ the system/edition needed to interpret it.
 scope, rank, edition/year, and any methodology/category stated by the ranking
 source.
 
-**Fact-to-score mapping:** `UNSPECIFIED — REQUIRES APPROVAL`. No rank range maps
-to a numeric score. There is no cross-system normalization. Ranking evidence
-without an approved system-specific mapping is preserved and yields no
-dimension score.
+**Unapproved NIRF example mapping (reference only; not executable):**
+
+| Rank/fact | Score |
+|---|---:|
+| 1–10 | 100.00 |
+| 11–25 | 95.00 |
+| 26–50 | 90.00 |
+| 51–100 | 80.00 |
+| 101–150 | 70.00 |
+| 151–200 | 60.00 |
+| Greater than 200 | 50.00 |
+| Explicitly reported “not ranked” | 0.00 |
+
+This table was supplied as an example only. It is not an approved production
+mapping, implementation rule, or golden-test oracle. The policy owner must
+confirm which NIRF categories it applies to, the qualifying evidence/source
+conditions, and how category/year are established. No QS or THE mapping was
+supplied. Ranking evidence without an approved system/category mapping is
+preserved without a dimension score.
 
 **Multiple facts/conflicts:** combining systems, categories, or editions and
 resolving changed ranks across editions are `UNSPECIFIED — REQUIRES APPROVAL`.
 
 ### 5.6 College: `accreditation`
 
-**Candidate fact families:** accreditation/recognition from an identified body
-such as NAAC, NBA, UGC, or AICTE, including status, grade, scope, and validity
-where applicable.
+**Owner-approved fact families:** NAAC, NBA, UGC recognition, AICTE
+approval/recognition where applicable, Institute of National Importance, and
+other explicitly configured statutory recognition. Preserve type, status,
+validity/current period when available, institution/program scope, and
+source/provenance. General reputation statements are not accreditation facts.
 
 **Non-scoreable by themselves under current approval:** a body-name mention,
 an unscoped recognition claim, or a status lacking enough context to identify
@@ -280,8 +395,11 @@ are `UNSPECIFIED — REQUIRES APPROVAL`.
 
 ### 5.7 College: `academic_research`
 
-**Candidate fact families:** publications, citations, patents, faculty research,
-research centers, and other explicitly documented research outputs.
+**Owner-approved fact families:** publications, citations, patents, research
+projects, research funding, faculty research recognition, and research
+labs/centres. Preserve metric, value, unit, period/year, scope, and
+source/provenance for quantitative facts. An individual's publication or
+patent does not automatically become an institutional metric.
 
 **Non-scoreable by themselves under current approval:** raw publication,
 citation, or patent counts; faculty size; a research-center name; or a generic
@@ -300,9 +418,11 @@ centers, and different periods is `UNSPECIFIED — REQUIRES APPROVAL`.
 
 ### 5.8 College: `placements`
 
-**Candidate fact families:** placement rate, cohort size/denominator, median or
-average salary, reporting year, recruiter count/list, and published placement
-report/methodology.
+**Owner-approved fact families:** placement rate, median salary, average
+salary, number of offers, number of recruiters, PPOs, and placement-period
+outcomes. Preserve metric, value, unit, placement/academic year,
+program/category, and source/provenance. Highest package, average package, and
+median salary remain distinct metrics; no substitution is allowed.
 
 **Non-scoreable by themselves under current approval:** a recruiter list or
 count, salary without context, placement percentage without denominator and
@@ -322,9 +442,12 @@ salary statistics, and methodologies is `UNSPECIFIED — REQUIRES APPROVAL`.
 
 ### 5.9 College: `perception_infrastructure`
 
-**Candidate fact families:** documented campus facilities/infrastructure and
-attributable perception evidence, including student-life/alumni evidence where
-an approved definition makes it relevant.
+**Owner-approved fact families:** campus infrastructure, hostels,
+laboratories/facilities, student ecosystem/life, alumni evidence, and
+institutional reputation evidence. Official institutional information can
+establish existence of a facility; existence alone does not define its quality
+score. Arbitrary reviews/opinions do not automatically become deterministic
+quality scores.
 
 **Non-scoreable by themselves under current approval:** isolated anecdotes,
 generic or unsupported “top campus”/sentiment claims, search snippets without
@@ -344,24 +467,34 @@ perception evidence are `UNSPECIFIED — REQUIRES APPROVAL`.
 
 ## 6. Missing, unverifiable, incomparable, and conflict outcomes
 
-The following state distinctions are part of the approved top-level contract,
-but their exact operational triggers remain incomplete:
+Evidence state definitions approved by the policy owner:
 
-- `INSUFFICIENT_EVIDENCE`: approved state for no qualifying/scoreable evidence.
-  Exact sufficiency criteria for each dimension are
-  `UNSPECIFIED — REQUIRES APPROVAL`.
+- `SUFFICIENT`: target entity is identified; a recognized fact type exists;
+  required fields are present; the source is credible enough for that fact;
+  and required temporal/scope information is available where applicable.
+- `INSUFFICIENT`: relevant evidence exists, but required information is
+  incomplete.
+- `UNAVAILABLE`: no qualifying evidence was found after the configured
+  research queries.
+
+The following dimension evaluation states are also approved:
+
+- `INSUFFICIENT_EVIDENCE`: a non-score state; exact conversion from the three
+  evidence states, including `UNAVAILABLE`, is `UNSPECIFIED — REQUIRES
+  APPROVAL`.
 - `CONFLICTED`: approved state exists, but what constitutes a material conflict
   and whether it blocks the entire dimension are
   `UNSPECIFIED — REQUIRES APPROVAL`.
 - `SCORED`: requires at least one approved fact-to-score rule to apply. No such
-  rules are currently approved for any dimension.
+  complete dimension rule is currently approved. The supplied NIRF example is
+  partial until its category and evidence conditions are confirmed.
 - `NOT_APPLICABLE`: supported state, reserved for future applicability rules;
   the applicability rules are `UNSPECIFIED — REQUIRES APPROVAL`.
 
 Unverifiable or incomparable observations must remain available for audit and
-must not be converted to favorable or unfavorable numeric evidence. Whether
-they are ignored alongside otherwise scoreable facts or force a non-score
-state requires dimension-specific approval.
+must not be converted to favorable or unfavorable numeric evidence. Their
+dimension-state conversion and treatment alongside otherwise scoreable facts
+remain unresolved.
 
 ## 7. Overall rank
 
@@ -369,13 +502,36 @@ state requires dimension-specific approval.
 dimensions are `SCORED`; otherwise `overall_rank = None`. No partial rank is
 allowed.
 
-**Aggregation formula:** `UNSPECIFIED — REQUIRES APPROVAL`.
+**Approved aggregation formulae:**
 
-The following are not selected: equal-weight arithmetic mean, weighted mean, or
-another formula. Also requiring approval are output precision, rounding mode,
-and the precise treatment of dimension scores at 0 and 100 within the formula.
-The range of dimension scores is already approved as 0–100; no formula should
-be implemented until the aggregation decision is approved.
+College:
+
+```text
+overall_rank =
+    official_ranking          * Decimal("0.25")
+  + accreditation             * Decimal("0.15")
+  + academic_research         * Decimal("0.25")
+  + placements                * Decimal("0.25")
+  + perception_infrastructure * Decimal("0.10")
+```
+
+Company:
+
+```text
+overall_rank =
+    financial_valuation   * Decimal("0.25")
+  + market_position       * Decimal("0.30")
+  + engineering_technical * Decimal("0.25")
+  + reputation_compliance * Decimal("0.20")
+```
+
+Weights total `Decimal("1.00")` for each entity type. Calculate in Decimal,
+keep full intermediate precision, and round the final output once using
+`ROUND_HALF_UP` to two decimal places. A dimension value of `0.00` contributes
+zero; `100.00` contributes its full configured weight. Since all applicable
+dimensions must be scored, missing/non-score states prevent the overall
+calculation rather than being substituted with zero. No tie-breaking policy is
+needed for this numeric aggregate; equal overall scores remain equal scores.
 
 ## 8. Future configuration/versioning requirements
 
@@ -383,8 +539,9 @@ After rubric decisions are approved, a future versioned configuration should
 contain at least:
 
 ```text
-rubric_version: "1.0.0"
-effective_date: REQUIRES APPROVAL
+rubric_id: "research_scoring_v1"
+rubric_version: "1.0.0" (proposed; not frozen)
+effective_date: REQUIRES HUMAN APPROVAL
 dimension_definitions: all nine dimensions
 fact_types: approved typed facts per dimension
 required_fields: approved requirements per fact type
@@ -392,7 +549,8 @@ score_mappings: exact conditions and score/band outputs
 fact_aggregation_rules: approved duplicate/multiple-fact behavior
 conflict_rules: approved materiality and resulting state
 missing_evidence_rules: approved sufficiency conditions
-overall_aggregation: approved formula, precision, and rounding
+overall_aggregation: approved entity-specific weights/formula, precision,
+  and rounding
 ```
 
 The repository has versioned configuration patterns for candidate scoring,
@@ -400,27 +558,64 @@ but no research scoring configuration convention. This document is placed in
 `docs/specifications/` as the smallest standalone specification artifact; it
 does not introduce a runtime configuration architecture.
 
-## 9. Approval checklist — implementation remains blocked
+## 9. Remaining approval blockers — implementation remains blocked
 
 Before freezing `research_scoring_v1` as authoritative, approval is required
 for:
 
-1. Exact score mappings for each fact type/combination in all nine dimensions.
-2. Dimension-specific required fields and evidence sufficiency criteria.
-3. Duplicate-fact identity and independent-corroboration behavior.
-4. Multiple-fact aggregation within each dimension.
-5. Material-conflict definition and the resulting dimension state.
-6. Treatment of unverifiable/incomparable facts when other scoreable facts
-   exist.
-7. Any system-specific ranking mapping (or explicit decision that ranking
-   evidence remains unscored until such mappings exist).
-8. Overall-rank formula, output precision, and rounding rule.
-9. Effective date and confirmation of rubric version `1.0.0`.
+1. Fact-to-score mappings and dimension-specific sufficiency for
+   `financial_valuation`, `market_position`, `engineering_technical`,
+   `reputation_compliance`, `accreditation`, `academic_research`, `placements`,
+   and `perception_infrastructure`.
+2. Confirm NIRF rank table scope (which categories and applicable editions),
+   plus its evidence source and explicit `not ranked` condition. No QS/THE
+   mapping is provided.
+3. Source credibility/admissibility criteria and deterministic authority
+   precedence for conflict handling; source quality may not be a numeric
+   weight.
+4. Recency/validity policy for selecting the latest valid fact by dimension;
+   no universal recency multiplier is allowed.
+5. Exact evidence-state conversion, especially `UNAVAILABLE` versus
+   `INSUFFICIENT`, and whether either can ever mean `NOT_APPLICABLE`.
+6. Deterministic fact normalization/canonicalization and duplicate identity
+   over the supplied tuple: entity, dimension, fact type, normalized metric,
+   normalized value, unit, period, and scope.
+7. Definition of independent/corroborating sources. Corroboration does not
+   change fact value or directly award score; its role in evidence sufficiency
+   is unresolved.
+8. Dimension-specific handling of different periods, scopes, programs,
+   currencies, units, methodologies, and incomparable facts.
+9. Material-conflict criteria and when a fact becomes unresolved; whether
+   unresolved facts make a whole dimension `CONFLICTED` or can be excluded
+   while other facts still score.
+10. Operational criteria for `SUFFICIENT`, `INSUFFICIENT`, and `UNAVAILABLE`,
+    including “credible enough” source admissibility.
+11. The public output shape for dimensions that are non-scored: the illustrative
+    output shows numeric values only, while approved states require non-score
+    representation and the overall may be null.
+12. Effective date and confirmation/finalization of version `1.0.0`.
 
 No executable scoring tests should encode numeric answers until the associated
 rules are approved. Once approved, known-answer tests should cover every
 approved band, boundary, missing/conflict state, aggregation case, and overall
 rank condition.
+
+### 9.1 Deterministic examples currently derivable
+
+The supplied NIRF example table suggests these illustrative outcomes only.
+They are not approved expected scores and must not be encoded in production or
+golden tests before category scope and evidence conditions are approved:
+
+| Input fact | Expected score | Notes |
+|---|---:|---|
+| NIRF rank 1, within an approved category/edition | 100.00 | Top supplied band |
+| NIRF rank 75, within an approved category/edition | 80.00 | Middle supplied band |
+| NIRF rank 201, within an approved category/edition | 50.00 | `>200` supplied band |
+| Explicit “not ranked” fact | 0.00 | Only if the required category/edition and fact are established |
+
+There is no approved positive-score or conflict example for the other eight
+dimensions, nor a general known-answer example for duplicates/conflicts. Adding
+such scores now would invent business policy.
 
 ## 10. Isolation and implementation constraints
 
@@ -429,6 +624,9 @@ candidate scoring, policy, eligibility, seniority, or graph behavior into
 research scoring. Candidate scoring must not import research scoring. Reports
 and UI may display authoritative research results but may not recalculate them.
 
-There is no scoring implementation in this milestone. No thresholds, weights,
-fact mappings, conflict heuristics, ranking conversions, or overall-rank
-formula have been selected by implication.
+There is no scoring implementation in this milestone. No unapproved
+thresholds, fact mappings, conflict heuristics, ranking conversions, or
+additional overall-rank rules have been selected by implication. The
+company/college aggregate weights and formula above were explicitly supplied
+earlier; they do not unblock dimension scoring. All remaining blockers still
+prevent implementation.
