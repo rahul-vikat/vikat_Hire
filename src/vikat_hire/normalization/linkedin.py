@@ -1,15 +1,23 @@
 from __future__ import annotations
 
 import json
+from calendar import month_abbr
 from datetime import date
 from typing import Any
 
 from pydantic import ValidationError
 
-from vikat_hire.contracts.common import DatePrecision, SourceType
+from vikat_hire.contracts.common import (
+    DatePrecision,
+    EvidenceConfidence,
+    EvidenceStatus,
+    SourceType,
+)
 from vikat_hire.contracts.normalization import (
     ExtractedTextBlock,
     NormalizedExperienceRecord,
+    NormalizedResponsibility,
+    NormalizedSkill,
 )
 
 
@@ -23,8 +31,8 @@ def normalize_linkedin_experience(
 ) -> tuple[NormalizedExperienceRecord, ...]:
     """Normalize employment entries inside an Apify dataset envelope.
 
-    This parser does not match JD requirements, calculate durations, infer
-    skills or responsibilities, classify seniority, or score candidates.
+    This parser does not match JD requirements, calculate durations, classify
+    seniority, or score candidates.
 
     Apify dataset output is a JSON list of profile-item objects. A single
     profile object is also accepted for direct callers. Dataset items without
@@ -39,9 +47,32 @@ def normalize_linkedin_experience(
             "LinkedIn normalization requires a LinkedIn extracted block"
         )
 
+    return normalize_linkedin_observations(block=block)[0]
+
+
+def normalize_linkedin_observations(
+    *,
+    block: ExtractedTextBlock,
+) -> tuple[
+    tuple[NormalizedExperienceRecord, ...],
+    tuple[NormalizedSkill, ...],
+    tuple[NormalizedResponsibility, ...],
+]:
+    """Normalize explicit employment, skill, and description observations."""
+    if not isinstance(block, ExtractedTextBlock):
+        raise LinkedInNormalizationError(
+            "block must be an ExtractedTextBlock"
+        )
+    if block.source_type is not SourceType.LINKEDIN:
+        raise LinkedInNormalizationError(
+            "LinkedIn normalization requires a LinkedIn extracted block"
+        )
+
     payload = _parse_payload(block.text)
     profile_items = payload if isinstance(payload, list) else [payload]
     records: list[NormalizedExperienceRecord] = []
+    skills: list[NormalizedSkill] = []
+    responsibilities: list[NormalizedResponsibility] = []
 
     for profile_index, profile in enumerate(profile_items):
         if not isinstance(profile, dict):
@@ -61,15 +92,41 @@ def normalize_linkedin_experience(
                 f"LinkedIn dataset item[{profile_index}].experience must be a list"
             )
         for raw_record in experience:
-            records.append(
-                _normalize_experience_record(
-                    raw_record=raw_record,
-                    block=block,
-                    index=len(records),
+            record_index = len(records)
+            if not isinstance(raw_record, dict):
+                raise LinkedInNormalizationError(
+                    f"LinkedIn experience[{record_index}] must be an object"
                 )
+            record_skills = _normalize_experience_skills(
+                raw_record=raw_record,
+                block=block,
+                index=record_index,
             )
+            description = _optional_text(
+                raw_record,
+                "description",
+                index=record_index,
+            )
+            record_responsibilities = _normalize_experience_description(
+                description=description,
+                block=block,
+                index=record_index,
+            )
+            record = _normalize_experience_record(
+                raw_record=raw_record,
+                block=block,
+                index=record_index,
+                skill_refs=tuple(item.skill_id for item in record_skills),
+                responsibility_refs=tuple(
+                    item.responsibility_id
+                    for item in record_responsibilities
+                ),
+            )
+            records.append(record)
+            skills.extend(record_skills)
+            responsibilities.extend(record_responsibilities)
 
-    return tuple(records)
+    return tuple(records), tuple(skills), tuple(responsibilities)
 
 
 def _parse_payload(text: str) -> dict[str, Any] | list[Any]:
@@ -99,6 +156,8 @@ def _normalize_experience_record(
     raw_record: Any,
     block: ExtractedTextBlock,
     index: int,
+    skill_refs: tuple[str, ...],
+    responsibility_refs: tuple[str, ...],
 ) -> NormalizedExperienceRecord:
     if not isinstance(raw_record, dict):
         raise LinkedInNormalizationError(
@@ -130,8 +189,8 @@ def _normalize_experience_record(
                 end_precision=end_precision,
             ),
             current=current,
-            skill_refs=(),
-            responsibility_refs=(),
+            skill_refs=skill_refs,
+            responsibility_refs=responsibility_refs,
             source_text=_source_text(
                 raw_record=raw_record,
                 description=description,
@@ -145,6 +204,68 @@ def _normalize_experience_record(
         raise LinkedInNormalizationError(
             f"invalid normalized LinkedIn experience[{index}]: {exc}"
         ) from exc
+
+
+def _normalize_experience_skills(
+    *,
+    raw_record: dict[str, Any],
+    block: ExtractedTextBlock,
+    index: int,
+) -> tuple[NormalizedSkill, ...]:
+    raw_skills = raw_record.get("skills", [])
+    if raw_skills is None:
+        return ()
+    if not isinstance(raw_skills, list):
+        raise LinkedInNormalizationError(
+            f"LinkedIn experience[{index}].skills must be a list"
+        )
+
+    results: list[NormalizedSkill] = []
+    for skill_index, value in enumerate(raw_skills):
+        if not isinstance(value, str) or not value.strip():
+            raise LinkedInNormalizationError(
+                f"LinkedIn experience[{index}].skills[{skill_index}] "
+                "must be a non-blank string"
+            )
+        results.append(
+            NormalizedSkill(
+                skill_id=(
+                    f"{block.block_id}:experience:{index}:skill:{skill_index}"
+                ),
+                name=value.strip(),
+                source_type=SourceType.LINKEDIN,
+                source_ref=block.source_ref,
+                evidence_status=EvidenceStatus.SUPPORTED,
+                evidence_refs=(block.block_id,),
+                provenance_refs=block.provenance_refs,
+                confidence=EvidenceConfidence.HIGH,
+            )
+        )
+    return tuple(results)
+
+
+def _normalize_experience_description(
+    *,
+    description: str | None,
+    block: ExtractedTextBlock,
+    index: int,
+) -> tuple[NormalizedResponsibility, ...]:
+    if description is None:
+        return ()
+    return (
+        NormalizedResponsibility(
+            responsibility_id=(
+                f"{block.block_id}:experience:{index}:responsibility:0"
+            ),
+            text=description,
+            source_type=SourceType.LINKEDIN,
+            source_ref=block.source_ref,
+            evidence_status=EvidenceStatus.SUPPORTED,
+            evidence_refs=(block.block_id,),
+            provenance_refs=block.provenance_refs,
+            confidence=EvidenceConfidence.MEDIUM,
+        ),
+    )
 
 
 def _optional_text(
@@ -199,10 +320,22 @@ def _parse_date_field(
         )
     if month is None:
         return _validated_date(year, 1, field_name=field_name, index=index), DatePrecision.YEAR
-    if not isinstance(month, int) or isinstance(month, bool):
+    if isinstance(month, str):
+        month_lookup = {
+            abbreviation.casefold(): month_number
+            for month_number, abbreviation in enumerate(month_abbr)
+            if abbreviation
+        }
+        month = month_lookup.get(month.strip().casefold())
+        if month is None:
+            raise LinkedInNormalizationError(
+                f"LinkedIn experience[{index}].{field_name}.month "
+                "must be a valid abbreviated month"
+            )
+    elif not isinstance(month, int) or isinstance(month, bool):
         raise LinkedInNormalizationError(
             f"LinkedIn experience[{index}].{field_name}.month "
-            "must be an integer"
+            "must be an integer or abbreviated month string"
         )
     if month < 1 or month > 12:
         raise LinkedInNormalizationError(

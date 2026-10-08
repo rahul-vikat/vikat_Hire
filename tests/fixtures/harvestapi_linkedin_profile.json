@@ -1,0 +1,21 @@
+[
+  {
+    "name": "Example Candidate",
+    "experience": [
+      {
+        "position": "Software Engineer",
+        "companyName": "Example Company",
+        "description": "Built and maintained backend services.",
+        "skills": ["Python", "FastAPI"],
+        "startDate": {
+          "month": "Jan",
+          "year": 2024,
+          "text": "Jan 2024"
+        },
+        "endDate": {
+          "text": "Present"
+        }
+      }
+    ]
+  }
+]

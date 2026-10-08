@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -9,6 +10,7 @@ from vikat_hire.contracts.normalization import ExtractedTextBlock, ExtractionKin
 from vikat_hire.normalization.linkedin import (
     LinkedInNormalizationError,
     normalize_linkedin_experience,
+    normalize_linkedin_observations,
 )
 
 
@@ -64,7 +66,9 @@ def test_normalizes_structured_experience_and_preserves_traceability() -> None:
     assert record.date_precision is DatePrecision.MONTH
     assert record.source_text == "Led service design work."
     assert record.skill_refs == ()
-    assert record.responsibility_refs == ()
+    assert record.responsibility_refs == (
+        "linkedin-block-001:experience:0:responsibility:0",
+    )
     assert record.evidence_refs == ("linkedin-block-001",)
     assert record.provenance_refs == ("linkedin-provenance-001",)
 
@@ -118,6 +122,72 @@ def test_normalizes_apify_dataset_array_envelope() -> None:
     assert records[0].record_id == "linkedin-dataset-block:experience:0"
     assert records[0].role == "Engineer"
     assert records[0].employer == "Example"
+
+
+def test_normalizes_documented_harvestapi_employment_fixture() -> None:
+    fixture_path = (
+        Path(__file__).parents[1]
+        / "fixtures"
+        / "harvestapi_linkedin_profile.json"
+    )
+    payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+    block = ExtractedTextBlock(
+        block_id="harvestapi-profile-block",
+        source_type=SourceType.LINKEDIN,
+        source_ref="linkedin-fixture",
+        text=json.dumps(payload),
+        extraction_kind=ExtractionKind.PLAIN_TEXT,
+        provenance_refs=("linkedin-fixture-provenance",),
+    )
+
+    records = normalize_linkedin_experience(block=block)
+
+    assert len(records) == 1
+    record = records[0]
+    assert record.role == "Software Engineer"
+    assert record.employer == "Example Company"
+    assert record.start_date is not None
+    assert (record.start_date.year, record.start_date.month) == (2024, 1)
+    assert record.current is True
+    assert record.source_text == "Built and maintained backend services."
+    assert len(record.skill_refs) == 2
+    assert len(record.responsibility_refs) == 1
+    assert record.evidence_refs == ("harvestapi-profile-block",)
+    assert record.provenance_refs == ("linkedin-fixture-provenance",)
+    assert [item.name for item in normalize_linkedin_observations(block=block)[1]] == [
+        "Python",
+        "FastAPI",
+    ]
+
+
+def test_normalizes_explicit_experience_skills_and_rejects_malformed_skills() -> None:
+    block = _block(
+        {
+            "experience": [
+                {
+                    "position": "Engineer",
+                    "description": "Built backend APIs.",
+                    "skills": ["Python", "FastAPI"],
+                }
+            ]
+        }
+    )
+
+    records, skills, responsibilities = normalize_linkedin_observations(
+        block=block
+    )
+    assert records[0].skill_refs == tuple(item.skill_id for item in skills)
+    assert records[0].responsibility_refs == tuple(
+        item.responsibility_id for item in responsibilities
+    )
+    assert [item.name for item in skills] == ["Python", "FastAPI"]
+    assert responsibilities[0].text == "Built backend APIs."
+    assert all(item.provenance_refs == block.provenance_refs for item in skills)
+
+    with pytest.raises(LinkedInNormalizationError, match="skills must be a list"):
+        normalize_linkedin_observations(
+            block=_block({"experience": [{"skills": "Python"}]})
+        )
 
 
 def test_dataset_items_without_experience_produce_no_records() -> None:

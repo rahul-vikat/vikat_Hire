@@ -79,6 +79,7 @@ def test_linkedin_apify_dataset_experience_flows_into_normalization() -> None:
                         {
                             "position": "Engineer",
                             "companyName": "Example",
+                            "skills": ["Python", "FastAPI"],
                             "startDate": {"month": 1, "year": 2020},
                             "endDate": {"month": 12, "year": 2022},
                             "description": "Built backend services.",
@@ -106,8 +107,14 @@ def test_linkedin_apify_dataset_experience_flows_into_normalization() -> None:
     assert record.employer == "Example"
     assert record.source_type is SourceType.LINKEDIN
     assert record.source_ref == "linkedin-structured"
+    assert len(record.skill_refs) == 2
+    assert len(record.responsibility_refs) == 1
     assert record.evidence_refs == ("linkedin-structured-block",)
     assert record.provenance_refs == ("linkedin-structured:source",)
+    assert [item.name for item in result.skills] == ["Python", "FastAPI"]
+    assert result.skills[0].evidence_refs == ("linkedin-structured-block",)
+    assert result.skills[0].provenance_refs == ("linkedin-structured:source",)
+    assert result.responsibilities[0].text == "Built backend services."
 
 
 def test_github_scope_evidence_is_factual_only() -> None:

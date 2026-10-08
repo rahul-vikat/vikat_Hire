@@ -9,7 +9,7 @@ from vikat_hire.contracts.normalization import (
     NormalizedSourceState,
 )
 from vikat_hire.normalization.candidate import normalize_candidate
-from vikat_hire.normalization.linkedin import normalize_linkedin_experience
+from vikat_hire.normalization.linkedin import normalize_linkedin_observations
 
 _EXTERNAL_SOURCE_TYPES = frozenset(
     {
@@ -66,12 +66,11 @@ def normalize_external_sources(
         screening_id=screening_id,
     )
 
-    linkedin_experience_records = tuple(
-        record
+    linkedin_observations = tuple(
+        normalize_linkedin_observations(block=block)
         for block in block_tuple
         if block.source_type is SourceType.LINKEDIN
         and block.text.lstrip().startswith(("{", "["))
-        for record in normalize_linkedin_experience(block=block)
     )
     existing_experience_ids = {
         record.record_id for record in experience_records
@@ -80,8 +79,34 @@ def normalize_external_sources(
         *experience_records,
         *(
             record
-            for record in linkedin_experience_records
+            for record in (
+                experience
+                for normalized in linkedin_observations
+                for experience in normalized[0]
+            )
             if record.record_id not in existing_experience_ids
+        ),
+    )
+    existing_skill_ids = {item.skill_id for item in skills}
+    skills = (
+        *skills,
+        *(
+            item
+            for normalized in linkedin_observations
+            for item in normalized[1]
+            if item.skill_id not in existing_skill_ids
+        ),
+    )
+    existing_responsibility_ids = {
+        item.responsibility_id for item in responsibilities
+    }
+    responsibilities = (
+        *responsibilities,
+        *(
+            item
+            for normalized in linkedin_observations
+            for item in normalized[2]
+            if item.responsibility_id not in existing_responsibility_ids
         ),
     )
 
