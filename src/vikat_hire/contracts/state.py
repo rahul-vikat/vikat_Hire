@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated
 
 from pydantic import Field
-from .explanation import ExplanationResult
-from .common import ContractModel, ReviewReason, WorkflowStatus, new_id, utc_now
-from .evaluation import EvaluationResult
+
+from .common import ContractModel, WorkflowStatus, new_id, utc_now
+from .evaluation import EvaluationResult, ScopeAlignmentAssessment
 from .evidence import Claim, ClaimReconciliation, Evidence, Provenance
+from .explanation import ExplanationResult
 from .inputs import ScreeningInput
 from .matching import KeywordMatch, LLMSemanticProposal, SemanticMatch
 from .policy import PolicyResult, ReviewRequest
+from .scope import JDScopeEvaluation
 from .scoring import ScoreResult
 
 
@@ -52,6 +53,9 @@ class ScreeningState(ContractModel):
     llm_semantic_proposals: tuple[LLMSemanticProposal, ...] = ()
 
     reconciliations: tuple[ClaimReconciliation, ...] = ()
+
+    scope_alignment: ScopeAlignmentAssessment | None = None
+    jd_scope_evaluation: JDScopeEvaluation | None = None
 
     evaluation: EvaluationResult | None = None
 
