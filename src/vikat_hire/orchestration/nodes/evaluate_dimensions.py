@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from vikat_hire.contracts.common import DimensionName
 from vikat_hire.contracts.evaluation import (
     DimensionEvaluation,
     EvaluationResult,
@@ -10,6 +11,7 @@ from vikat_hire.contracts.state import ScreeningState
 from vikat_hire.evaluation.dimensions import (
     DimensionEvaluationError,
     assemble_evaluation_result,
+    evaluate_seniority_dimension,
 )
 
 
@@ -42,7 +44,12 @@ def evaluate_dimensions_node(
             "state must be a ScreeningState"
         )
 
-    dimension_tuple = tuple(dimensions)
+    try:
+        dimension_tuple = tuple(dimensions)
+    except TypeError as exc:
+        raise DimensionEvaluationNodeError(
+            "dimensions must be an iterable of DimensionEvaluation objects"
+        ) from exc
 
     if any(
         not isinstance(dimension, DimensionEvaluation)
@@ -59,6 +66,25 @@ def evaluate_dimensions_node(
         raise DimensionEvaluationNodeError(
             "contradiction_refs must contain only non-empty strings"
         )
+
+    if state.scope_alignment is not None:
+        if any(
+            dimension.dimension is DimensionName.SENIORITY_SCOPE_ALIGNMENT
+            for dimension in dimension_tuple
+        ):
+            raise DimensionEvaluationNodeError(
+                "dimensions must not include SENIORITY_SCOPE_ALIGNMENT when "
+                "state.scope_alignment is present"
+            )
+
+        try:
+            seniority_dimension = evaluate_seniority_dimension(
+                evaluation=state.scope_alignment.seniority_evaluation
+            )
+        except DimensionEvaluationError as exc:
+            raise DimensionEvaluationNodeError(str(exc)) from exc
+
+        dimension_tuple = (*dimension_tuple, seniority_dimension)
 
     try:
         evaluation = assemble_evaluation_result(
