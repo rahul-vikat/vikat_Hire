@@ -9,6 +9,7 @@ from vikat_hire.contracts.common import DatePrecision, SourceType
 from vikat_hire.contracts.normalization import ExtractedTextBlock, ExtractionKind
 from vikat_hire.normalization.linkedin import (
     LinkedInNormalizationError,
+    normalize_linkedin_education,
     normalize_linkedin_experience,
     normalize_linkedin_observations,
 )
@@ -158,6 +159,112 @@ def test_normalizes_documented_harvestapi_employment_fixture() -> None:
         "Python",
         "FastAPI",
     ]
+
+    education = normalize_linkedin_education(block=block)
+    assert len(education) == 1
+    assert education[0].school_name == "Example Institute"
+    assert education[0].school_id == "12345"
+    assert education[0].school_linkedin_url == (
+        "https://www.linkedin.com/company/example-institute/"
+    )
+    assert education[0].degree == "Bachelor's degree"
+    assert education[0].field_of_study == "Computer Science"
+    assert education[0].start_date is not None
+    assert (education[0].start_date.year, education[0].start_date.month) == (
+        2019,
+        8,
+    )
+    assert education[0].end_date is not None
+    assert (education[0].end_date.year, education[0].end_date.month) == (
+        2023,
+        5,
+    )
+    assert education[0].current is False
+    assert education[0].evidence_refs == ("harvestapi-profile-block",)
+    assert education[0].provenance_refs == ("linkedin-fixture-provenance",)
+
+
+def test_normalizes_multiple_linkedin_education_entries_in_source_order() -> None:
+    records = normalize_linkedin_education(
+        block=_block(
+            {
+                "profileTopEducation": [
+                    {"schoolName": "First College"},
+                    {"schoolName": "Second College"},
+                ]
+            }
+        )
+    )
+
+    assert [record.school_name for record in records] == [
+        "First College",
+        "Second College",
+    ]
+    assert [record.education_id for record in records] == [
+        "linkedin-block-001:education:0",
+        "linkedin-block-001:education:1",
+    ]
+
+
+def test_missing_or_empty_profile_top_education_produces_no_records() -> None:
+    assert normalize_linkedin_education(
+        block=_block({"experience": []})
+    ) == ()
+    assert normalize_linkedin_education(
+        block=_block({"profileTopEducation": []})
+    ) == ()
+
+
+def test_duplicate_education_entries_are_preserved_as_observations() -> None:
+    records = normalize_linkedin_education(
+        block=_block(
+            {
+                "profileTopEducation": [
+                    {"schoolName": "Same College", "schoolId": "7"},
+                    {"schoolName": "Same College", "schoolId": "7"},
+                ]
+            }
+        )
+    )
+
+    assert len(records) == 2
+    assert records[0].school_name == records[1].school_name
+    assert records[0].education_id != records[1].education_id
+
+
+def test_education_normalization_is_deterministic() -> None:
+    block = _block(
+        {"profileTopEducation": [{"schoolName": "Example Institute"}]}
+    )
+
+    assert normalize_linkedin_education(block=block) == normalize_linkedin_education(
+        block=block
+    )
+
+
+@pytest.mark.parametrize(
+    "education, message",
+    [
+        ("not-an-object", "must be an object"),
+        ({"degree": "BSc"}, "schoolName must be a non-blank string"),
+        ({"schoolName": "College", "schoolId": 123}, "schoolId must be a string"),
+    ],
+)
+def test_malformed_linkedin_education_entry_fails(
+    education: object,
+    message: str,
+) -> None:
+    with pytest.raises(LinkedInNormalizationError, match=message):
+        normalize_linkedin_education(
+            block=_block({"profileTopEducation": [education]})
+        )
+
+
+def test_non_list_profile_top_education_fails() -> None:
+    with pytest.raises(LinkedInNormalizationError, match="must be a list"):
+        normalize_linkedin_education(
+            block=_block({"profileTopEducation": {"schoolName": "College"}})
+        )
 
 
 def test_normalizes_explicit_experience_skills_and_rejects_malformed_skills() -> None:

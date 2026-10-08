@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 from datetime import date
-from enum import StrEnum
-from typing import Any
-
 from decimal import Decimal
+from enum import StrEnum
 
 from pydantic import Field, field_validator, model_validator
 
@@ -17,8 +15,8 @@ from .common import (
     RequirementImportance,
     SourceType,
 )
-from .evidence import Claim
 from .evaluation import ExperienceRecord
+from .evidence import Claim
 from .scope import JDScopeEvidence, ScopeEvidence, ScopeEvidenceCategory, ScopeEvidencePolarity
 
 
@@ -175,7 +173,7 @@ class NormalizedExperienceRecord(ContractModel):
         return value
 
     @model_validator(mode="after")
-    def validate_dates(self) -> "NormalizedExperienceRecord":
+    def validate_dates(self) -> NormalizedExperienceRecord:
         if (
             self.start_date is not None
             and self.end_date is not None
@@ -212,6 +210,37 @@ class NormalizedExperienceRecord(ContractModel):
             provenance_refs=self.provenance_refs,
             evidence_refs=self.evidence_refs,
         )
+
+
+class NormalizedEducationRecord(ContractModel):
+    """Factual education observation normalized from a source profile."""
+
+    education_id: str = Field(min_length=1)
+    school_name: str = Field(min_length=1)
+    school_id: str | None = None
+    school_linkedin_url: str | None = None
+    degree: str | None = None
+    field_of_study: str | None = None
+    period: str | None = None
+    start_date: date | None = None
+    end_date: date | None = None
+    date_precision: DatePrecision = DatePrecision.UNKNOWN
+    current: bool = False
+    start_date: date | None = None
+    end_date: date | None = None
+    date_precision: DatePrecision = DatePrecision.UNKNOWN
+    current: bool = False
+    source_type: SourceType
+    source_ref: str = Field(min_length=1)
+    evidence_refs: tuple[str, ...] = Field(min_length=1)
+    provenance_refs: tuple[str, ...] = Field(min_length=1)
+
+    @field_validator("school_name")
+    @classmethod
+    def school_name_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("school_name must not be blank")
+        return value.strip()
 
 
 class JDRequirement(ContractModel):
@@ -260,7 +289,7 @@ class JDExperienceRequirement(JDRequirement):
     )
 
     @model_validator(mode="after")
-    def validate_minimum_years(self) -> "JDExperienceRequirement":
+    def validate_minimum_years(self) -> JDExperienceRequirement:
         if self.minimum_years == Decimal("0"):
             raise ValueError(
                 "minimum_years must be positive when specified"
@@ -344,6 +373,8 @@ class NormalizationResult(ContractModel):
 
     experience_records: tuple[NormalizedExperienceRecord, ...] = ()
 
+    education_records: tuple[NormalizedEducationRecord, ...] = ()
+
     scope_evidence: tuple[NormalizedScopeEvidence, ...] = ()
 
     jd_requirements: tuple[JDRequirement, ...] = ()
@@ -357,7 +388,7 @@ class NormalizationResult(ContractModel):
     provenance_refs: tuple[str, ...] = ()
 
     @model_validator(mode="after")
-    def validate_source_states(self) -> "NormalizationResult":
+    def validate_source_states(self) -> NormalizationResult:
         allowed_keys = {
             source.source_ref
             for source in self.extracted_blocks
@@ -373,6 +404,10 @@ class NormalizationResult(ContractModel):
         allowed_keys.update(
             source.source_ref
             for source in self.experience_records
+        )
+        allowed_keys.update(
+            source.source_ref
+            for source in self.education_records
         )
         allowed_keys.update(
             source.source_ref

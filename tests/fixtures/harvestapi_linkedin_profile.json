@@ -16,6 +16,18 @@
           "text": "Present"
         }
       }
+    ],
+    "profileTopEducation": [
+      {
+        "schoolName": "Example Institute",
+        "schoolLinkedinUrl": "https://www.linkedin.com/company/example-institute/",
+        "schoolId": "12345",
+        "degree": "Bachelor's degree",
+        "fieldOfStudy": "Computer Science",
+        "period": "Aug 2019 - May 2023",
+        "startDate": {"month": "Aug", "year": 2019},
+        "endDate": {"month": "May", "year": 2023}
+      }
     ]
   }
 ]

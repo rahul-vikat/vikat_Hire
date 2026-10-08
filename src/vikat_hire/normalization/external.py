@@ -9,7 +9,10 @@ from vikat_hire.contracts.normalization import (
     NormalizedSourceState,
 )
 from vikat_hire.normalization.candidate import normalize_candidate
-from vikat_hire.normalization.linkedin import normalize_linkedin_observations
+from vikat_hire.normalization.linkedin import (
+    normalize_linkedin_education,
+    normalize_linkedin_observations,
+)
 
 _EXTERNAL_SOURCE_TYPES = frozenset(
     {
@@ -72,6 +75,13 @@ def normalize_external_sources(
         if block.source_type is SourceType.LINKEDIN
         and block.text.lstrip().startswith(("{", "["))
     )
+    education_records = tuple(
+        education
+        for block in block_tuple
+        if block.source_type is SourceType.LINKEDIN
+        and block.text.lstrip().startswith(("{", "["))
+        for education in normalize_linkedin_education(block=block)
+    )
     existing_experience_ids = {
         record.record_id for record in experience_records
     }
@@ -123,6 +133,7 @@ def normalize_external_sources(
         skills=skills,
         responsibilities=responsibilities,
         experience_records=experience_records,
+        education_records=education_records,
         scope_evidence=scope_evidence,
         source_states=normalized_states,
         provenance_refs=provenance_refs,

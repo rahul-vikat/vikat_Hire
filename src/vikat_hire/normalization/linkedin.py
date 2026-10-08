@@ -15,6 +15,7 @@ from vikat_hire.contracts.common import (
 )
 from vikat_hire.contracts.normalization import (
     ExtractedTextBlock,
+    NormalizedEducationRecord,
     NormalizedExperienceRecord,
     NormalizedResponsibility,
     NormalizedSkill,
@@ -48,6 +49,140 @@ def normalize_linkedin_experience(
         )
 
     return normalize_linkedin_observations(block=block)[0]
+
+
+def normalize_linkedin_education(
+    *,
+    block: ExtractedTextBlock,
+) -> tuple[NormalizedEducationRecord, ...]:
+    """Normalize the supplied HarvestAPI ``profileTopEducation`` field.
+
+    Missing or empty education is represented as no records. Duplicate
+    entries are preserved in source order as distinct observations.
+    """
+    if not isinstance(block, ExtractedTextBlock):
+        raise LinkedInNormalizationError(
+            "block must be an ExtractedTextBlock"
+        )
+    if block.source_type is not SourceType.LINKEDIN:
+        raise LinkedInNormalizationError(
+            "LinkedIn normalization requires a LinkedIn extracted block"
+        )
+
+    payload = _parse_payload(block.text)
+    profile_items = payload if isinstance(payload, list) else [payload]
+    records: list[NormalizedEducationRecord] = []
+
+    for profile_index, profile in enumerate(profile_items):
+        if not isinstance(profile, dict):
+            raise LinkedInNormalizationError(
+                f"LinkedIn dataset item[{profile_index}] must be an object"
+            )
+        raw_education = profile.get("profileTopEducation", [])
+        if raw_education is None:
+            raw_education = []
+        if not isinstance(raw_education, list):
+            raise LinkedInNormalizationError(
+                "LinkedIn dataset item["
+                f"{profile_index}].profileTopEducation must be a list"
+            )
+
+        for education in raw_education:
+            index = len(records)
+            if not isinstance(education, dict):
+                raise LinkedInNormalizationError(
+                    f"LinkedIn profileTopEducation[{index}] must be an object"
+                )
+            school_name = _required_education_text(
+                education,
+                "schoolName",
+                index=index,
+            )
+            start_date, start_precision = _parse_date_field(
+                education.get("startDate"),
+                field_name="startDate",
+                index=index,
+            )
+            end_date, end_precision, current = _parse_end_date(
+                education.get("endDate"),
+                index=index,
+            )
+            records.append(
+                NormalizedEducationRecord(
+                    education_id=f"{block.block_id}:education:{index}",
+                    school_name=school_name,
+                    school_id=_optional_education_text(
+                        education,
+                        "schoolId",
+                        index=index,
+                    ),
+                    school_linkedin_url=_optional_education_text(
+                        education,
+                        "schoolLinkedinUrl",
+                        index=index,
+                    ),
+                    degree=_optional_education_text(
+                        education,
+                        "degree",
+                        index=index,
+                    ),
+                    field_of_study=_optional_education_text(
+                        education,
+                        "fieldOfStudy",
+                        index=index,
+                    ),
+                    period=_optional_education_text(
+                        education,
+                        "period",
+                        index=index,
+                    ),
+                    start_date=start_date,
+                    end_date=end_date,
+                    date_precision=_resolve_date_precision(
+                        start_precision=start_precision,
+                        end_precision=end_precision,
+                    ),
+                    current=current,
+                    source_type=SourceType.LINKEDIN,
+                    source_ref=block.source_ref,
+                    evidence_refs=(block.block_id,),
+                    provenance_refs=block.provenance_refs,
+                )
+            )
+
+    return tuple(records)
+
+
+def _required_education_text(
+    record: dict[str, Any],
+    field_name: str,
+    *,
+    index: int,
+) -> str:
+    value = _optional_education_text(record, field_name, index=index)
+    if value is None:
+        raise LinkedInNormalizationError(
+            f"LinkedIn profileTopEducation[{index}].{field_name} "
+            "must be a non-blank string"
+        )
+    return value
+
+
+def _optional_education_text(
+    record: dict[str, Any],
+    field_name: str,
+    *,
+    index: int,
+) -> str | None:
+    value = record.get(field_name)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise LinkedInNormalizationError(
+            f"LinkedIn profileTopEducation[{index}].{field_name} "
+            "must be a string or null"
+        )
+    return value.strip() or None
 
 
 def normalize_linkedin_observations(

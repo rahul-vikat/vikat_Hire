@@ -48,6 +48,40 @@ def test_empty_external_input_produces_no_invented_facts() -> None:
     assert result.source_states == {}
 
 
+def test_linkedin_education_flows_into_normalization_result() -> None:
+    block = _block(
+        json.dumps(
+            [
+                {
+                    "experience": [],
+                    "profileTopEducation": [
+                        {
+                            "schoolName": "Example Institute",
+                            "schoolId": "school-1",
+                            "degree": "Bachelor's degree",
+                            "fieldOfStudy": "Computer Science",
+                        }
+                    ],
+                }
+            ]
+        ),
+        block_id="linkedin-education-block",
+    )
+
+    result = normalize_external_sources(
+        blocks=(block,),
+        screening_id="screening-001",
+    )
+
+    assert len(result.education_records) == 1
+    record = result.education_records[0]
+    assert record.school_name == "Example Institute"
+    assert record.school_id == "school-1"
+    assert record.source_ref == block.source_ref
+    assert record.evidence_refs == (block.block_id,)
+    assert record.provenance_refs == block.provenance_refs
+
+
 def test_linkedin_uses_conservative_explicit_skill_parsing() -> None:
     result = normalize_external_sources(
         blocks=(
