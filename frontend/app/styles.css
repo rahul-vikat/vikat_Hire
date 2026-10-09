@@ -110,6 +110,7 @@ h3 { font: 700 1rem/1.3 Manrope, sans-serif; }
 .gate-row p { margin: 0; color: var(--muted); font-size: .86rem; }
 .positive { color: var(--green); }
 .negative { color: var(--red); }
+.neutral { color: var(--muted); }
 .review-list { margin-top: 22px; }
 .review-list h3 { margin-bottom: 10px; }
 .review-item { margin-top: 10px; padding: 14px; border-left: 3px solid #d89e40; border-radius: 0 10px 10px 0; background: #fff9ee; }

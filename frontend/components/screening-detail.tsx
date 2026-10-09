@@ -9,6 +9,10 @@ import type {
   Provenance,
   ScreeningAPIResponse,
 } from "@/lib/contracts";
+import {
+  eligibilityPresentation,
+  gateStatusPresentation,
+} from "@/lib/gate-status.mjs";
 
 function asApiResponse(value: unknown): ScreeningAPIResponse | null {
   if (typeof value !== "object" || value === null || !("report" in value)) return null;
@@ -116,6 +120,10 @@ export function ScreeningDetail({ screeningId }: { screeningId: string }) {
   const scores = new Map(report.score?.dimensions.map((item) => [item.dimension, item]) ?? []);
   const evidenceById = new Map(report.evidence.map((item) => [item.evidence_id, item]));
   const provenanceById = new Map(report.provenances.map((item) => [item.provenance_id, item]));
+  const hasBlockingReview = report.review_requests.some((request) => request.blocking === true);
+  const eligibility = report.policy
+    ? eligibilityPresentation(report.policy.suitability_eligible, hasBlockingReview)
+    : null;
 
   return (
     <main className="shell">
@@ -179,7 +187,7 @@ export function ScreeningDetail({ screeningId }: { screeningId: string }) {
         <section className="summary-grid" aria-label="Policy outcome">
           <div className="panel summary-card">
             <span className="eyebrow">Eligibility</span>
-            <strong>{report.policy.suitability_eligible ? "Eligible" : "Not eligible"}</strong>
+            <strong className={eligibility?.className}>{eligibility?.label}</strong>
           </div>
           <div className="panel summary-card">
             <span className="eyebrow">Confidence</span>
@@ -217,15 +225,16 @@ export function ScreeningDetail({ screeningId }: { screeningId: string }) {
           <p className="eyebrow">Deterministic policy</p>
           <h2>Gates and review</h2>
           <div className="gate-list">
-            {report.policy.gates.map((gate, index) => (
-              <div className="gate-row" key={String(gate.gate_id ?? index)}>
-                <span>{String(gate.name ?? "Policy gate")}</span>
-                <strong className={gate.passed === true ? "positive" : "negative"}>
-                  {gate.passed === true ? "Pass" : "Fail"}
-                </strong>
-                <p>{String(gate.rationale ?? "")}</p>
-              </div>
-            ))}
+            {report.policy.gates.map((gate, index) => {
+              const presentation = gateStatusPresentation(gate.status);
+              return (
+                <div className="gate-row" key={gate.gate_id || index}>
+                  <span>{gate.name}</span>
+                  <strong className={presentation.className}>{presentation.label}</strong>
+                  <p>{gate.rationale}</p>
+                </div>
+              );
+            })}
           </div>
           {report.review_requests.length > 0 && (
             <div className="review-list">

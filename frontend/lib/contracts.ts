@@ -54,6 +54,18 @@ export interface DimensionScore {
   evidence_refs: string[];
 }
 
+export type GateStatus = "PASS" | "FAIL" | "NOT_APPLICABLE";
+
+export interface PolicyGate {
+  gate_id: string;
+  name: string;
+  status: GateStatus;
+  requirement_refs: string[];
+  evidence_refs: string[];
+  rationale: string;
+  configuration_ref: string;
+}
+
 export interface ScreeningReport {
   screening_id: string;
   workflow_status: WorkflowStatus;
@@ -83,7 +95,7 @@ export interface ScreeningReport {
   } | null;
   policy: {
     screening_id: string;
-    gates: Array<Record<string, unknown>>;
+    gates: PolicyGate[];
     review_requests: Array<Record<string, unknown>>;
     workflow_status: WorkflowStatus;
     suitability_eligible: boolean;
